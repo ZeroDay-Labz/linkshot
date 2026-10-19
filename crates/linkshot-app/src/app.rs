@@ -81,6 +81,9 @@ pub struct App {
     pending: Option<PendingCapture>,
     pub capture_visible: bool,
     pub editor_visible: bool,
+    /// Editor geometry chosen when its viewport opened. egui turns any change in a viewport's builder
+    /// into a move/resize command, so feeding back the remembered rect every frame fights the user's drag.
+    editor_open_geometry: Option<(Option<[f32; 2]>, [f32; 2], [f32; 2])>,
     pub capture_toggled: bool,
     pub hotkeys: Hotkeys,
     pub tray: Tray,
@@ -162,6 +165,7 @@ impl App {
             pending: None,
             capture_visible: !background,
             editor_visible: false,
+            editor_open_geometry: None,
             capture_toggled: false,
             hotkeys: if headless_dark.is_some() { Hotkeys::disabled() } else { let c = ctx.clone(); Hotkeys::new(move || crate::keepalive::wake(&c)) },
             tray: if headless_dark.is_some() { Tray::disabled() } else { let c = ctx.clone(); Tray::new(move || crate::keepalive::wake(&c)) },
@@ -929,8 +933,11 @@ impl eframe::App for App {
         }
 
         // Editor viewport.
+        if !self.editor_visible { self.editor_open_geometry = None; }
         if self.editor_visible {
-            let (pos, size, min) = self.editor_window_geometry();
+            let geometry = match self.editor_open_geometry { Some(g) => g, None => self.editor_window_geometry() };
+            self.editor_open_geometry = Some(geometry);
+            let (pos, size, min) = geometry;
             let mut builder = egui::ViewportBuilder::default()
                 .with_title("LinkShot Editor")
                 .with_app_id("linkshot")

@@ -518,6 +518,8 @@ pub fn editor_ui(app: &mut App, ctx: &egui::Context, actions: &mut Vec<Action>) 
                 ctx.request_repaint_after(std::time::Duration::from_millis(500));
             } else { app.editor.status = None; }
         }
+        // Last, so the edge strips win the hit test over whatever is drawn underneath them.
+        resize_edges(ui, ctx, full);
     });
     dialogs(app, ctx, actions);
     video_view::gif_dialog_ui(app, ctx);
@@ -628,6 +630,31 @@ fn doc_details(app: &App) -> String {
     match app.editor.current_doc() {
         Some(d) => format!("{} — {}×{} px, {} objects, {}", d.doc.display_name(), d.doc.page().capture_canvas_width, d.doc.page().capture_canvas_height, d.doc.page().capture_objects.len(), d.doc.path.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "unsaved".into())),
         None => "No capture selected.".into(),
+    }
+}
+
+/// The Editor has no system frame (`with_decorations(false)`), so it gets no resize border from the
+/// window manager: thin strips along the edges and corners hand a drag to it as a native resize.
+fn resize_edges(ui: &mut egui::Ui, ctx: &egui::Context, full: Rect) {
+    use egui::{CursorIcon as C, ResizeDirection as D};
+    if ctx.input(|i| i.viewport().maximized.unwrap_or(false) || i.viewport().fullscreen.unwrap_or(false)) { return; }
+    const EDGE: f32 = 5.0;
+    const CORNER: f32 = 12.0;
+    let (l, r, t, b) = (full.left(), full.right(), full.top(), full.bottom());
+    let zones = [
+        (Rect::from_min_max(Pos2::new(l, t), Pos2::new(l + CORNER, t + CORNER)), D::NorthWest, C::ResizeNorthWest),
+        (Rect::from_min_max(Pos2::new(r - CORNER, t), Pos2::new(r, t + CORNER)), D::NorthEast, C::ResizeNorthEast),
+        (Rect::from_min_max(Pos2::new(l, b - CORNER), Pos2::new(l + CORNER, b)), D::SouthWest, C::ResizeSouthWest),
+        (Rect::from_min_max(Pos2::new(r - CORNER, b - CORNER), Pos2::new(r, b)), D::SouthEast, C::ResizeSouthEast),
+        (Rect::from_min_max(Pos2::new(l + CORNER, t), Pos2::new(r - CORNER, t + EDGE)), D::North, C::ResizeNorth),
+        (Rect::from_min_max(Pos2::new(l + CORNER, b - EDGE), Pos2::new(r - CORNER, b)), D::South, C::ResizeSouth),
+        (Rect::from_min_max(Pos2::new(l, t + CORNER), Pos2::new(l + EDGE, b - CORNER)), D::West, C::ResizeWest),
+        (Rect::from_min_max(Pos2::new(r - EDGE, t + CORNER), Pos2::new(r, b - CORNER)), D::East, C::ResizeEast),
+    ];
+    for (i, (rect, dir, cursor)) in zones.into_iter().enumerate() {
+        let resp = ui.interact(rect, ui.id().with(("resize-edge", i)), Sense::drag());
+        if resp.hovered() || resp.dragged() { ctx.set_cursor_icon(cursor); }
+        if resp.drag_started() { ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(dir)); }
     }
 }
 
