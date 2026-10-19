@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.zerodaylabz.LinkShot</id>
+  <name>LinkShot</name>
+  <summary>Screen capture, scrolling capture, video recording and an image editor</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT OR Apache-2.0</project_license>
+  <developer id="io.github.zerodaylabz"><name>ZeroDay-Labz</name></developer>
+  <description>
+    <p>LinkShot captures regions, windows, full screens and whole scrolling pages at native resolution, records
+    the screen to animated GIF or MP4, extracts text from images, and edits captures with arrows, callouts,
+    shapes, text, highlights, blur, steps, effects and more.</p>
+    <p>Everything needed is included: video export and text recognition work out of the box.</p>
+  </description>
+  <launchable type="desktop-id">io.github.zerodaylabz.LinkShot.desktop</launchable>
+  <url type="homepage">https://github.com/ZeroDay-Labz/linkshot</url>
+  <url type="bugtracker">https://github.com/ZeroDay-Labz/linkshot/issues</url>
+  <categories><category>Graphics</category><category>Utility</category></categories>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-10-18"/>
+  </releases>
+</component>

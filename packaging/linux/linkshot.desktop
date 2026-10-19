@@ -1,0 +1,19 @@
+[Desktop Entry]
+Type=Application
+Name=LinkShot
+GenericName=Screen Capture
+Comment=Screen capture, scrolling capture, video recording and an image editor
+Exec=linkshot %U
+TryExec=linkshot
+Icon=linkshot
+Terminal=false
+Categories=Graphics;Utility;
+Keywords=screenshot;screen capture;screen recording;gif;ocr;
+StartupWMClass=linkshot
+MimeType=application/x-snagx;image/png;image/jpeg;image/gif;image/bmp;image/tiff;image/webp;video/mp4;
+X-KDE-DBUS-Restricted-Interfaces=org.kde.KWin.ScreenShot2
+Actions=capture;
+
+[Desktop Action capture]
+Name=Capture now
+Exec=linkshot --capture

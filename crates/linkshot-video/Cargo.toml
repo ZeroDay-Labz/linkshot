@@ -1,0 +1,21 @@
+[package]
+name = "linkshot-video"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Video recording spool, GIF/MP4 export and playback for linkshot"
+
+[dependencies]
+anyhow.workspace = true
+tracing.workspace = true
+image.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+crossbeam-channel.workspace = true
+linkshot-tools.workspace = true
+gif = "0.14"
+color_quant = "1.1"
+lz4_flex = { version = "0.11", default-features = false, features = ["safe-encode", "safe-decode", "frame"] }
+
+[dev-dependencies]
+tracing-subscriber.workspace = true

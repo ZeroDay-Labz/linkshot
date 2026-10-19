@@ -1,0 +1,14 @@
+[package]
+name = "linkshot-render"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "tiny-skia rasteriser for linkshot documents"
+
+[dependencies]
+linkshot-core.workspace = true
+anyhow.workspace = true
+tiny-skia.workspace = true
+image.workspace = true
+tracing.workspace = true
+cosmic-text = "0.14"

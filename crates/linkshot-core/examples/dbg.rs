@@ -1,0 +1,1 @@
+fn main() { let p = std::env::args().nth(1).unwrap(); match linkshot_core::snagx::read_file(std::path::Path::new(&p)) { Ok(d) => println!("ok {} objects", d.page().capture_objects.len()), Err(e) => println!("ERR {e:#}") } }

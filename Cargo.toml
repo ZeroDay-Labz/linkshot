@@ -1,0 +1,55 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/linkshot-core",
+    "crates/linkshot-render",
+    "crates/linkshot-capture",
+    "crates/linkshot-platform",
+    "crates/linkshot-app",
+    "crates/linkshot-ocr",
+    "crates/linkshot-video",
+    "crates/linkshot-tools",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/echo/linkshot"
+
+[workspace.dependencies]
+linkshot-core = { path = "crates/linkshot-core" }
+linkshot-render = { path = "crates/linkshot-render" }
+linkshot-capture = { path = "crates/linkshot-capture" }
+linkshot-platform = { path = "crates/linkshot-platform" }
+linkshot-ocr = { path = "crates/linkshot-ocr" }
+linkshot-video = { path = "crates/linkshot-video" }
+linkshot-tools = { path = "crates/linkshot-tools" }
+
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "ico", "tiff", "webp"] }
+tiny-skia = "0.11"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+base64 = "0.22"
+quick-xml = { version = "0.37", features = ["serialize"] }
+directories = "6"
+rayon = "1"
+parking_lot = "0.12"
+crossbeam-channel = "0.5"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+lto = "thin"
+codegen-units = 4

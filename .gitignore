@@ -1,0 +1,8 @@
+/target
+*.snagx.tmp
+/packaging/third-party/
+/dist/
+/.idea/
+/.flatpak-builder/
+/packaging/flatpak/build/
+/packaging/flatpak/repo/

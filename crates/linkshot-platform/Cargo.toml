@@ -1,0 +1,16 @@
+[package]
+name = "linkshot-platform"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Hotkeys, tray icon, clipboard and OS integration for linkshot"
+
+[dependencies]
+linkshot-core.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+image.workspace = true
+arboard = { version = "3", features = ["image-data"] }
+open = "5"
+directories.workspace = true
+crossbeam-channel.workspace = true

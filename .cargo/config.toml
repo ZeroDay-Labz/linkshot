@@ -1,0 +1,5 @@
+# Workaround for distros without mesa-libgbm-devel: `linklibs/` provides an unversioned libgbm.so
+# symlink for the linker. Install mesa-libgbm-devel (Fedora) / libgbm-dev (Debian) and delete this
+# file if you prefer. The path is relative to the workspace root (cargo runs rustc from there).
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-Llinklibs"]

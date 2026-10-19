@@ -1,0 +1,126 @@
+[package]
+name = "linkshot"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "LinkShot — screen capture, scrolling capture, video recording and image editor"
+
+build = "build.rs"
+
+[[bin]]
+name = "linkshot"
+path = "src/main.rs"
+
+[features]
+default = ["hotkeys", "tray"]
+hotkeys = ["dep:global-hotkey"]
+tray = ["dep:tray-icon", "dep:ksni"]
+# Single-file build: the tool bundle (ffmpeg, tesseract, OCR models) travels inside the executable.
+bundled-tools = ["linkshot-tools/embedded"]
+
+[build-dependencies]
+embed-resource = "3"
+
+[dependencies]
+linkshot-core.workspace = true
+linkshot-render.workspace = true
+linkshot-capture.workspace = true
+linkshot-platform.workspace = true
+linkshot-ocr.workspace = true
+linkshot-video.workspace = true
+linkshot-tools.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+image.workspace = true
+uuid.workspace = true
+base64.workspace = true
+parking_lot.workspace = true
+crossbeam-channel.workspace = true
+eframe = { version = "0.33", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
+egui = "0.33"
+rfd = "0.15"
+global-hotkey = { version = "0.7", optional = true }
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+tray-icon = { version = "0.21", optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# StatusNotifierItem tray (left-click Activate works, unlike libappindicator).
+ksni = { version = "0.3", default-features = false, features = ["async-io", "blocking"], optional = true }
+ashpd = { version = "0.13", default-features = false, features = ["async-io", "global_shortcuts"] }
+async-io = "2"
+futures-util = { version = "0.3", default-features = false }
+
+# ---- Linux packages (cargo deb / cargo generate-rpm) ----
+# The binary goes to /usr/bin; the tool bundle (ffmpeg, tesseract, OCR models) built by
+# packaging/make-bundles.sh goes to /usr/lib/linkshot, where linkshot-tools finds it.
+[package.metadata.deb]
+name = "linkshot"
+maintainer = "ZeroDay-Labz <306595122+ZeroDay-Labz@users.noreply.github.com>"
+copyright = "2026 ZeroDay-Labz"
+license-file = ["../../LICENSE-MIT", "0"]
+extended-description = """Screen capture, scrolling capture, video recording (GIF/MP4), text extraction and an
+image editor. Ships with its own ffmpeg and Tesseract so nothing else has to be installed."""
+section = "graphics"
+priority = "optional"
+depends = "libc6 (>= 2.34), libgcc-s1, libxcb1, libxau6, libgbm1, libdrm2, libexpat1, libxkbcommon0, libwayland-client0, libegl1, libgl1"
+recommends = "xdg-desktop-portal, libgtk-3-0"
+assets = [
+    ["target/release/linkshot", "usr/bin/", "755"],
+    ["../../packaging/third-party/bundle/linux/**/*", "usr/lib/linkshot/", "755"],
+    ["../../packaging/linux/linkshot.desktop", "usr/share/applications/", "644"],
+    ["../../packaging/linux/io.github.zerodaylabz.LinkShot.metainfo.xml", "usr/share/metainfo/", "644"],
+    ["../../assets/linkshot.svg", "usr/share/icons/hicolor/scalable/apps/linkshot.svg", "644"],
+    ["../../packaging/icons/linkshot-16.png", "usr/share/icons/hicolor/16x16/apps/linkshot.png", "644"],
+    ["../../packaging/icons/linkshot-22.png", "usr/share/icons/hicolor/22x22/apps/linkshot.png", "644"],
+    ["../../packaging/icons/linkshot-24.png", "usr/share/icons/hicolor/24x24/apps/linkshot.png", "644"],
+    ["../../packaging/icons/linkshot-32.png", "usr/share/icons/hicolor/32x32/apps/linkshot.png", "644"],
+    ["../../packaging/icons/linkshot-48.png", "usr/share/icons/hicolor/48x48/apps/linkshot.png", "644"],
+    ["../../packaging/icons/linkshot-64.png", "usr/share/icons/hicolor/64x64/apps/linkshot.png", "644"],
+    ["../../packaging/icons/linkshot-128.png", "usr/share/icons/hicolor/128x128/apps/linkshot.png", "644"],
+    ["../../packaging/icons/linkshot-256.png", "usr/share/icons/hicolor/256x256/apps/linkshot.png", "644"],
+    ["../../packaging/icons/linkshot-512.png", "usr/share/icons/hicolor/512x512/apps/linkshot.png", "644"],
+    ["../../README.md", "usr/share/doc/linkshot/README.md", "644"],
+]
+
+[package.metadata.generate-rpm]
+name = "linkshot"
+summary = "Screen capture, scrolling capture, video recording and an image editor"
+license = "MIT OR Apache-2.0"
+url = "https://github.com/ZeroDay-Labz/linkshot"
+auto-req = "no"
+assets = [
+    { source = "target/release/linkshot", dest = "/usr/bin/linkshot", mode = "755" },
+    { source = "packaging/third-party/bundle/linux/**/*", dest = "/usr/lib/linkshot/", mode = "755" },
+    { source = "packaging/linux/linkshot.desktop", dest = "/usr/share/applications/linkshot.desktop", mode = "644" },
+    { source = "packaging/linux/io.github.zerodaylabz.LinkShot.metainfo.xml", dest = "/usr/share/metainfo/io.github.zerodaylabz.LinkShot.metainfo.xml", mode = "644" },
+    { source = "assets/linkshot.svg", dest = "/usr/share/icons/hicolor/scalable/apps/linkshot.svg", mode = "644" },
+    { source = "packaging/icons/linkshot-16.png", dest = "/usr/share/icons/hicolor/16x16/apps/linkshot.png", mode = "644" },
+    { source = "packaging/icons/linkshot-22.png", dest = "/usr/share/icons/hicolor/22x22/apps/linkshot.png", mode = "644" },
+    { source = "packaging/icons/linkshot-24.png", dest = "/usr/share/icons/hicolor/24x24/apps/linkshot.png", mode = "644" },
+    { source = "packaging/icons/linkshot-32.png", dest = "/usr/share/icons/hicolor/32x32/apps/linkshot.png", mode = "644" },
+    { source = "packaging/icons/linkshot-48.png", dest = "/usr/share/icons/hicolor/48x48/apps/linkshot.png", mode = "644" },
+    { source = "packaging/icons/linkshot-64.png", dest = "/usr/share/icons/hicolor/64x64/apps/linkshot.png", mode = "644" },
+    { source = "packaging/icons/linkshot-128.png", dest = "/usr/share/icons/hicolor/128x128/apps/linkshot.png", mode = "644" },
+    { source = "packaging/icons/linkshot-256.png", dest = "/usr/share/icons/hicolor/256x256/apps/linkshot.png", mode = "644" },
+    { source = "packaging/icons/linkshot-512.png", dest = "/usr/share/icons/hicolor/512x512/apps/linkshot.png", mode = "644" },
+    { source = "README.md", dest = "/usr/share/doc/linkshot/README.md", mode = "644", doc = true },
+    { source = "LICENSE-MIT", dest = "/usr/share/licenses/linkshot/LICENSE-MIT", mode = "644" },
+    { source = "LICENSE-APACHE", dest = "/usr/share/licenses/linkshot/LICENSE-APACHE", mode = "644" },
+]
+
+[package.metadata.generate-rpm.requires]
+glibc = "*"
+libxcb = "*"
+libXau = "*"
+mesa-libgbm = "*"
+libdrm = "*"
+expat = "*"
+libxkbcommon = "*"
+libwayland-client = "*"
+mesa-libEGL = "*"
+mesa-libGL = "*"

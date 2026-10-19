@@ -1,0 +1,65 @@
+# Flatpak manifest. Build from the repository root:
+#   ./packaging/fetch-tools.sh && ./packaging/make-bundles.sh      # third-party tools (once)
+#   flatpak run org.flatpak.Builder --user --force-clean --install-deps-from=flathub \
+#       --repo=packaging/flatpak/repo packaging/flatpak/build packaging/flatpak/io.github.zerodaylabz.LinkShot.yml
+#   flatpak build-bundle packaging/flatpak/repo dist/LinkShot.flatpak io.github.zerodaylabz.LinkShot
+app-id: io.github.zerodaylabz.LinkShot
+runtime: org.freedesktop.Platform
+runtime-version: '25.08'
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+  # bindgen (pipewire-sys) needs libclang and clang's own headers.
+  - org.freedesktop.Sdk.Extension.llvm20
+command: linkshot
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  # Captures and the library are saved wherever the user chooses.
+  - --filesystem=home
+  - --filesystem=xdg-run/pipewire-0
+  # Prompt-free capture and window placement on KDE Plasma (ScreenShot2 + scripting), tray icon,
+  # notifications. Everything else goes through the XDG portals.
+  - --talk-name=org.kde.KWin
+  - --talk-name=org.kde.StatusNotifierWatcher
+  - --talk-name=org.freedesktop.Notifications
+  - --env=RUST_LOG=linkshot=info,warn
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/llvm20/bin
+  env:
+    CARGO_HOME: /run/build/linkshot/cargo
+    LIBCLANG_PATH: /usr/lib/sdk/llvm20/lib
+    BINDGEN_EXTRA_CLANG_ARGS: -I/usr/lib/sdk/llvm20/lib/clang/20/include
+  # cargo fetches the Rust dependencies during the build.
+  build-args:
+    - --share=network
+modules:
+  - name: linkshot
+    buildsystem: simple
+    build-commands:
+      - cargo build --release -p linkshot --locked
+      - install -Dm755 target/release/linkshot /app/bin/linkshot
+      - mkdir -p /app/lib/linkshot && cp -a bundle/. /app/lib/linkshot/
+      - install -Dm644 packaging/linux/linkshot.desktop /app/share/applications/io.github.zerodaylabz.LinkShot.desktop
+      - sed -i 's/^Icon=linkshot/Icon=io.github.zerodaylabz.LinkShot/' /app/share/applications/io.github.zerodaylabz.LinkShot.desktop
+      - install -Dm644 packaging/linux/io.github.zerodaylabz.LinkShot.metainfo.xml /app/share/metainfo/io.github.zerodaylabz.LinkShot.metainfo.xml
+      - for s in 16 22 24 32 48 64 128 256 512; do install -Dm644 packaging/icons/linkshot-$s.png /app/share/icons/hicolor/${s}x${s}/apps/io.github.zerodaylabz.LinkShot.png; done
+      - install -Dm644 assets/linkshot.svg /app/share/icons/hicolor/scalable/apps/io.github.zerodaylabz.LinkShot.svg
+    sources:
+      - type: dir
+        path: ../..
+        skip:
+          - .git
+          - target
+          - packaging/third-party
+          - packaging/flatpak/build
+          - packaging/flatpak/repo
+          - .flatpak-builder
+          - .idea
+          - linklibs
+          - .cargo
+      - type: dir
+        path: ../third-party/bundle/linux
+        dest: bundle

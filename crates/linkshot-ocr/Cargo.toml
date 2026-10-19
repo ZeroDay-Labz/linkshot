@@ -1,0 +1,16 @@
+[package]
+name = "linkshot-ocr"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Text extraction (Grab Text) for linkshot"
+
+[dependencies]
+anyhow.workspace = true
+tracing.workspace = true
+image.workspace = true
+linkshot-tools.workspace = true
+ocrs = "0.13"
+rten = "0.26"
+rten-imageproc = "0.26"
+ureq = { version = "3", default-features = false, features = ["rustls"] }
