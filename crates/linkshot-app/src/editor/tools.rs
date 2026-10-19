@@ -65,6 +65,8 @@ pub struct ToolState {
     pub hover_handle: Option<Handle>,
     /// Snapshot taken when a creation drag started (committed as one undo step when it ends).
     pub pending_before: Option<Document>,
+    /// Stamp picked in the side panel (index into `EditorState::stamps`); clicks place it.
+    pub current_stamp: Option<usize>,
 }
 
 impl ToolState {
@@ -311,7 +313,7 @@ pub fn handle_input(app: &mut App, ui: &mut egui::Ui, resp: &Response, canvas: R
             app.editor.tools.hover_handle = hover_handle;
             ctx.set_cursor_icon(match &app.editor.tools.hover_handle { Some(Handle::N | Handle::S) => egui::CursorIcon::ResizeVertical, Some(Handle::E | Handle::W) => egui::CursorIcon::ResizeHorizontal, Some(Handle::NE | Handle::SW) => egui::CursorIcon::ResizeNeSw, Some(Handle::NW | Handle::SE) => egui::CursorIcon::ResizeNwSe, Some(_) => egui::CursorIcon::Grab, None if over => egui::CursorIcon::Move, None => egui::CursorIcon::Default });
         }
-    } else if hover.is_some() && matches!(tool, ToolMode::Arrow | ToolMode::Line | ToolMode::Shape | ToolMode::Highlight | ToolMode::Blur | ToolMode::Magnify | ToolMode::Callouts | ToolMode::Text | ToolMode::Crop | ToolMode::Selection) {
+    } else if hover.is_some() && matches!(tool, ToolMode::Arrow | ToolMode::Line | ToolMode::Shape | ToolMode::Highlight | ToolMode::Blur | ToolMode::Magnify | ToolMode::Callouts | ToolMode::Text | ToolMode::Crop | ToolMode::Selection | ToolMode::Stamp) {
         ctx.set_cursor_icon(egui::CursorIcon::Crosshair);
     }
 
@@ -496,6 +498,12 @@ pub fn handle_input(app: &mut App, ui: &mut egui::Ui, resp: &Response, canvas: R
             ToolMode::VectorSelection => {
                 let hit = app.editor.current_doc().and_then(|d| hit_test(&d.doc, dp, tol));
                 match hit { Some(id) => { if shift { if let Some(p) = app.editor.tools.selection.iter().position(|x| *x == id) { app.editor.tools.selection.remove(p); } else { app.editor.tools.selection.push(id); } } else { app.editor.tools.selection = vec![id]; } } None => { if !shift { app.editor.tools.selection.clear(); } } }
+            }
+            ToolMode::Stamp => {
+                match app.editor.tools.current_stamp {
+                    Some(i) => super::stamps::insert_stamp(app, i, dp),
+                    None => app.editor.set_status("Pick a stamp in the panel, then click where it should go."),
+                }
             }
             ToolMode::Step => {
                 let q = app.editor.current_props();

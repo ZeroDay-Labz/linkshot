@@ -208,6 +208,75 @@ pub fn run_shots(dir: &std::path::Path, files: &[std::path::PathBuf], dark: bool
         let img = render_frame(&hctx, &mut renderer, hsize, 2.0, bg, |ctx| hud.ui(ctx, &pal));
         img.save(dir.join("scrolling_hud.png"))?;
     }
+    // Recording toolbar (ready, recording with audio + webcam, compact) and the Screen Draw layer.
+    {
+        use crate::recording_hud::{Phase, RecordingSetup, RecordingUi, HUD_H, HUD_W, MINI_H, MINI_W};
+        let region = linkshot_core::Rect::from_xywh(200.0, 150.0, 900.0, 600.0);
+        let monitor = linkshot_core::Rect::from_xywh(0.0, 0.0, 1600.0, 900.0);
+        let mut vs = app.presets.video.clone();
+        vs.enable_microphone = true;
+        vs.enable_system_audio = true;
+        vs.enable_webcam = false;
+        let setup = RecordingSetup { region, monitor, monitors: vec![monitor], settings: vs, fps: 30, max_size: None, spool_path: dir.join("hud.lsv"), ready_first: true, show_countdown: true, mic_alert: true, mute_hotkey: "Ctrl+Shift+M".into(), minimize_fullscreen: true, draw_hotkey: "Ctrl+Shift+D".into() };
+        let mut hud = RecordingUi::new(setup.clone(), std::sync::Arc::new(|| {}));
+        hud.mic = true;
+        hud.system_audio = true;
+        let hctx = egui::Context::default();
+        crate::theme::apply(&hctx, &pal);
+        let hsize = egui::vec2(HUD_W, HUD_H);
+        for _ in 0..2 { let _ = render_frame(&hctx, &mut renderer, hsize, 2.0, bg, |ctx| hud.ui(ctx, &pal)); }
+        render_frame(&hctx, &mut renderer, hsize, 2.0, bg, |ctx| hud.ui(ctx, &pal)).save(dir.join("recording_hud_ready.png"))?;
+        hud.phase = Phase::Recording;
+        hud.frames = 412; hud.elapsed_ms = 13_700;
+        hud.audio = linkshot_capture::video::AudioStatus { mic: true, mic_muted: false, mic_level: 0.45, system: true, system_level: 0.2, webcam: true, webcam_shown: true, webcam_fullscreen: false };
+        hud.webcam = Some(linkshot_capture::video::WebcamOptions { device: "lavfi:testsrc".into(), placement: linkshot_capture::webcam::Placement::BottomRight, shape: linkshot_capture::webcam::Shape::Circle, shown: true });
+        hud.draw = Some(crate::screen_draw::ScreenDraw::new(region, 3, false));
+        for _ in 0..2 { let _ = render_frame(&hctx, &mut renderer, hsize, 2.0, bg, |ctx| hud.ui(ctx, &pal)); }
+        render_frame(&hctx, &mut renderer, hsize, 2.0, bg, |ctx| hud.ui(ctx, &pal)).save(dir.join("recording_hud_recording.png"))?;
+        // Compact bar (whole-monitor recording).
+        let mut small = RecordingUi::new(RecordingSetup { region: monitor, ..setup }, std::sync::Arc::new(|| {}));
+        small.mic = true;
+        small.phase = Phase::Recording;
+        small.elapsed_ms = 65_400;
+        small.mic_muted = true;
+        let msize = egui::vec2(MINI_W, MINI_H);
+        for _ in 0..2 { let _ = render_frame(&hctx, &mut renderer, msize, 2.0, bg, |ctx| small.ui(ctx, &pal)); }
+        render_frame(&hctx, &mut renderer, msize, 2.0, bg, |ctx| small.ui(ctx, &pal)).save(dir.join("recording_hud_compact.png"))?;
+        // Screen Draw: an arrow, a square and two steps, drawn with synthetic pointer input.
+        let mut draw = crate::screen_draw::ScreenDraw::new(region, 30, true);
+        let dctx = egui::Context::default();
+        crate::theme::apply(&dctx, &pal);
+        let dsize = egui::vec2(region.width() as f32, region.height() as f32);
+        let mut feed = |events: Vec<egui::Event>, draw: &mut crate::screen_draw::ScreenDraw| {
+            let raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, dsize)), max_texture_side: Some(16384), events, ..Default::default() };
+            let out = dctx.run(raw, |ctx| draw.ui(ctx, &pal));
+            renderer.update_textures(&out.textures_delta);
+        };
+        let drag = |feed: &mut dyn FnMut(Vec<egui::Event>, &mut crate::screen_draw::ScreenDraw), draw: &mut crate::screen_draw::ScreenDraw, a: egui::Pos2, b: egui::Pos2| {
+            use egui::{Event, PointerButton};
+            feed(vec![Event::PointerMoved(a), Event::PointerButton { pos: a, button: PointerButton::Primary, pressed: true, modifiers: Default::default() }], draw);
+            let mid = egui::Pos2::new((a.x + b.x) / 2.0, (a.y + b.y) / 2.0);
+            feed(vec![Event::PointerMoved(mid)], draw);
+            feed(vec![Event::PointerMoved(b)], draw);
+            feed(vec![Event::PointerButton { pos: b, button: PointerButton::Primary, pressed: false, modifiers: Default::default() }], draw);
+            feed(vec![], draw);
+        };
+        feed(vec![], &mut draw); // egui hit-tests against the previous frame's widgets: lay the layer out once first
+        drag(&mut feed, &mut draw, egui::Pos2::new(120.0, 400.0), egui::Pos2::new(380.0, 220.0));
+        feed(vec![egui::Event::Key { key: egui::Key::S, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() }], &mut draw);
+        drag(&mut feed, &mut draw, egui::Pos2::new(420.0, 160.0), egui::Pos2::new(700.0, 330.0));
+        feed(vec![egui::Event::Key { key: egui::Key::Num1, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() }], &mut draw);
+        for p in [egui::Pos2::new(520.0, 450.0), egui::Pos2::new(640.0, 500.0)] {
+            use egui::{Event, PointerButton};
+            feed(vec![Event::PointerMoved(p), Event::PointerButton { pos: p, button: PointerButton::Primary, pressed: true, modifiers: Default::default() }], &mut draw);
+            feed(vec![Event::PointerButton { pos: p, button: PointerButton::Primary, pressed: false, modifiers: Default::default() }], &mut draw);
+            feed(vec![], &mut draw);
+        }
+        let mut canvas = RgbaImage::from_pixel(region.width() as u32, region.height() as u32, image::Rgba([54, 60, 70, 255]));
+        let layer = render_frame(&dctx, &mut renderer, dsize, 1.0, Color32::TRANSPARENT, |ctx| draw.ui(ctx, &pal));
+        image::imageops::overlay(&mut canvas, &layer, 0, 0);
+        canvas.save(dir.join("screen_draw.png"))?;
+    }
     // Grab Text Results window.
     {
         let mut gt = crate::grab_text::GrabTextUi::with_text("Capture settings\n\nSelection: Region\nEffects: None\nShare: Editor\n\nPress the Capture button or PrintScreen to start a capture.\nDrag to select a region, click a window, or press Enter for fullscreen.");
@@ -217,6 +286,19 @@ pub fn run_shots(dir: &std::path::Path, files: &[std::path::PathBuf], dark: bool
         for _ in 0..2 { let _ = render_frame(&gctx, &mut renderer, gsize, 2.0, bg, |ctx| gt.ui(ctx, &pal)); }
         let img = render_frame(&gctx, &mut renderer, gsize, 2.0, bg, |ctx| gt.ui(ctx, &pal));
         img.save(dir.join("grab_text_results.png"))?;
+    }
+    // Built-in stamps as a contact sheet.
+    {
+        let set = crate::editor::stamps::builtin();
+        let cell = 140u32;
+        let cols = 7u32;
+        let rows = (set.len() as u32 + cols - 1) / cols;
+        let mut sheet = RgbaImage::from_pixel(cols * cell, rows * cell, image::Rgba([240, 240, 240, 255]));
+        for (i, st) in set.iter().enumerate() {
+            let img = image::load_from_memory(&st.png)?.to_rgba8();
+            image::imageops::overlay(&mut sheet, &img, ((i as u32 % cols) * cell + 6) as i64, ((i as u32 / cols) * cell + 6) as i64);
+        }
+        sheet.save(dir.join("stamps.png"))?;
     }
     println!("wrote screenshots to {}", dir.display());
     Ok(())

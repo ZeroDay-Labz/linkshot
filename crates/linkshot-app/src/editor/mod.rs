@@ -2,6 +2,7 @@
 
 pub mod canvas;
 pub mod side_panel;
+pub mod stamps;
 pub mod tools;
 pub mod tray;
 pub mod video_view;
@@ -79,6 +80,7 @@ pub struct EditorState {
     pub toolbar: Vec<ToolBarItem>,
     pub more_tool: Option<ToolMode>,
     pub renderer: Renderer,
+    pub stamps: stamps::StampLibrary,
     pub canvas: canvas::CanvasState,
     pub tools: tools::ToolState,
     pub side_panel: SidePanelMode,
@@ -132,12 +134,8 @@ impl EditorState {
             props,
             themes: themes.to_vec(),
             current_theme,
-            toolbar: {
-                // Saved toolbars from before 0.2.1 carry the not-yet-available Stamp tool; swap it for Step.
-                let mut tb = if settings.toolbar.is_empty() { ToolBarItem::default_toolbar() } else { settings.toolbar.clone() };
-                for i in tb.iter_mut() { if i.item_type == ToolBarItemType::Tool && i.tool_mode == ToolMode::Stamp { i.tool_mode = ToolMode::Step; } }
-                tb
-            },
+            toolbar: if settings.toolbar.is_empty() { ToolBarItem::default_toolbar() } else { settings.toolbar.clone() },
+            stamps: Default::default(),
             more_tool: None,
             renderer: Renderer::new(),
             canvas: canvas::CanvasState::default(),
@@ -421,7 +419,7 @@ impl EditorState {
 
     pub fn select_tool(&mut self, t: ToolMode) {
         if t == ToolMode::Favorites || t == ToolMode::None { self.tool = t; return; }
-        if matches!(t, ToolMode::Stamp | ToolMode::Eraser | ToolMode::MagicWand | ToolMode::SimplifiedUI | ToolMode::CutOut) {
+        if matches!(t, ToolMode::Eraser | ToolMode::MagicWand | ToolMode::SimplifiedUI | ToolMode::CutOut) {
             self.set_status(format!("{} is not available yet", t.label()));
             return;
         }

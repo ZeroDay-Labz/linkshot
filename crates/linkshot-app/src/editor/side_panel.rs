@@ -8,7 +8,7 @@ use crate::widgets;
 use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Vec2};
 use linkshot_core::enums::*;
 use linkshot_core::style::QuickStyle;
-use linkshot_core::Argb;
+use linkshot_core::{Argb, Pt};
 
 pub fn side_panel_ui(app: &mut App, ui: &mut egui::Ui, rect: Rect) {
     ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
@@ -360,6 +360,48 @@ fn tool_properties(app: &mut App, ui: &mut egui::Ui, tool: ToolMode) {
             ui.label(egui::RichText::new("Click the canvas to fill a region with the colour.").small().color(pal.input_secondary));
         }
         ToolMode::Crop => { ui.label("Drag the blue handles to select the area, then click Crop."); }
+        ToolMode::Stamp => {
+            changed |= slider_row(ui, "Size", &mut q.stroke_width, 16.0..=512.0, " px");
+            let dir = app.paths.stamps_dir();
+            app.editor.stamps.ensure_loaded(&dir, false);
+            ui.label(egui::RichText::new("Click a stamp to add it, then click the canvas to place more.").small().color(pal.input_secondary));
+            let n = app.editor.stamps.stamps.len();
+            let mut picked: Option<usize> = None;
+            let ctx = ui.ctx().clone();
+            egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = egui::Vec2::splat(6.0);
+                    for i in 0..n {
+                        let Some(tid) = app.editor.stamps.texture(&ctx, i) else { continue };
+                        let selected = app.editor.tools.current_stamp == Some(i);
+                        let name = app.editor.stamps.stamps[i].name.clone();
+                        let (w, h) = (app.editor.stamps.stamps[i].width as f32, app.editor.stamps.stamps[i].height as f32);
+                        let fit = if w >= h { egui::Vec2::new(44.0, 44.0 * h / w.max(1.0)) } else { egui::Vec2::new(44.0 * w / h.max(1.0), 44.0) };
+                        let (rect, resp) = ui.allocate_exact_size(egui::Vec2::splat(52.0), egui::Sense::click());
+                        ui.painter().rect_filled(rect, 6.0, if selected { pal.product } else if resp.hovered() { pal.control_bright } else { pal.control });
+                        let img_rect = Rect::from_center_size(rect.center(), fit);
+                        ui.painter().image(tid, img_rect, Rect::from_min_max(egui::Pos2::ZERO, egui::Pos2::new(1.0, 1.0)), Color32::WHITE);
+                        if resp.on_hover_text(name).clicked() { picked = Some(i); }
+                    }
+                });
+            });
+            if let Some(i) = picked {
+                app.editor.tools.current_stamp = Some(i);
+                let at = app.editor.current_doc().map(|d| { let p = d.doc.page(); Pt::new(p.capture_canvas_width / 2.0, p.capture_canvas_height / 2.0) }).unwrap_or(Pt::new(100.0, 100.0));
+                super::stamps::insert_stamp(app, i, at);
+            }
+            ui.horizontal(|ui| {
+                if ui.button("Add stamps…").on_hover_text("Copy your own PNG/JPG files into the stamps folder").clicked() {
+                    if let Some(files) = rfd::FileDialog::new().set_title("Add stamps").add_filter("Images", &["png", "jpg", "jpeg", "webp", "bmp"]).pick_files() {
+                        let n = super::stamps::import_files(&dir, &files);
+                        app.editor.stamps.ensure_loaded(&dir, true);
+                        app.editor.set_status(format!("Added {n} stamp(s)."));
+                    }
+                }
+                if ui.button("Open folder").clicked() { let _ = std::fs::create_dir_all(&dir); let _ = linkshot_platform::open_path(&dir); }
+                if ui.button("Refresh").clicked() { app.editor.stamps.ensure_loaded(&dir, true); }
+            });
+        }
         ToolMode::Selection => {
             ui.label("Drag to select an area. Delete clears it, Copy copies it.");
         }

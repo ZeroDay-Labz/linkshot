@@ -45,6 +45,10 @@ struct WasapiSource {
     delivered: u64,
 }
 
+// The client and capture interfaces are created and used on the capture thread only; COM objects
+// from an MTA may be used from any thread, so handing the whole source to that thread is sound.
+unsafe impl Send for WasapiSource {}
+
 impl Source for WasapiSource {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
         loop {

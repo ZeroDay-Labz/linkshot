@@ -2491,6 +2491,7 @@ dependencies = [
  "rfd",
  "serde",
  "serde_json",
+ "tiny-skia",
  "tracing",
  "tracing-subscriber",
  "tray-icon",

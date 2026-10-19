@@ -389,17 +389,16 @@ impl RecordingUi {
             };
             let blink = self.phase != Phase::Recording || (self.phase_since.elapsed().as_millis() / 600) % 2 == 0;
             if blink { painter.circle_filled(Pos2::new(panel.left() + 26.0, panel.center().y), 6.0, dot); }
-            painter.text(Pos2::new(panel.left() + 40.0, panel.center().y - 9.0), Align2::LEFT_CENTER, &title, crate::theme::medium(13.0), pal.text_bright);
             // The muted-microphone alert replaces the status line while it applies.
             let muted_alert = self.mic_alert && self.mic && self.mic_muted && matches!(self.phase, Phase::Recording | Phase::Paused) && (self.phase_since.elapsed().as_millis() / 700) % 2 == 0;
             let (sub_text, sub_color) = if let Some(e) = &self.error { (e.clone(), pal.capture_red) } else if muted_alert { (format!("Microphone is muted — press M or {} to unmute", self.mute_hotkey), pal.capture_red) } else { (sub, pal.text) };
-            painter.text(Pos2::new(panel.left() + 40.0, panel.center().y + 9.0), Align2::LEFT_CENTER, sub_text, FontId::proportional(11.5), sub_color);
             if self.phase == Phase::Countdown {
                 let n = 3 - (self.phase_since.elapsed().as_secs_f32().floor() as u32).min(2);
                 painter.text(Pos2::new(panel.right() - 200.0, panel.center().y), Align2::CENTER_CENTER, n.to_string(), crate::theme::semibold(34.0), pal.selection_orange);
             }
 
-            // Buttons, right to left. `meter` draws a level bar along the bottom edge.
+            // Buttons, right to left. `meter` draws a level bar along the bottom edge. A label
+            // starting with '|' gets painted pause bars instead of a glyph the font may lack.
             let mut x = panel.right() - 8.0;
             let btn_h = 30.0;
             let mut button = |ui: &mut egui::Ui, label: &str, w: f32, accent: Option<Color32>, enabled: bool, tip: &str, meter: Option<f32>| -> bool {
@@ -410,7 +409,15 @@ impl RecordingUi {
                 let fill = match (accent, resp.hovered() && enabled) { (Some(c), true) => c.gamma_multiply(1.15), (Some(c), false) => c, (None, true) => pal.control_bright, (None, false) => pal.control };
                 ui.painter().rect_filled(r, 4.0, if enabled { fill } else { pal.control_dark });
                 let fg = match (accent, enabled) { (Some(_), true) => Color32::WHITE, (None, true) => pal.text_bright, (_, false) => pal.text };
-                ui.painter().text(r.center() - Vec2::new(0.0, if meter.is_some() { 2.0 } else { 0.0 }), Align2::CENTER_CENTER, label, FontId::proportional(13.0), fg);
+                let (bars, label) = match label.strip_prefix('|') { Some(rest) => (true, rest), None => (false, label) };
+                let text_pos = r.center() - Vec2::new(0.0, if meter.is_some() { 2.0 } else { 0.0 }) + Vec2::new(if bars { 7.0 } else { 0.0 }, 0.0);
+                let galley = ui.painter().layout_no_wrap(label.to_string(), FontId::proportional(13.0), fg);
+                if bars {
+                    let bx = text_pos.x - galley.size().x / 2.0 - 12.0;
+                    ui.painter().rect_filled(Rect::from_center_size(Pos2::new(bx - 3.0, r.center().y), Vec2::new(3.5, 12.0)), 1.0, fg);
+                    ui.painter().rect_filled(Rect::from_center_size(Pos2::new(bx + 3.0, r.center().y), Vec2::new(3.5, 12.0)), 1.0, fg);
+                }
+                ui.painter().galley(text_pos - galley.size() / 2.0, galley, fg);
                 if let Some(level) = meter {
                     let bar = Rect::from_min_max(Pos2::new(r.left() + 6.0, r.bottom() - 6.0), Pos2::new(r.right() - 6.0, r.bottom() - 3.0));
                     ui.painter().rect_filled(bar, 1.5, Color32::from_black_alpha(90));
@@ -444,7 +451,7 @@ impl RecordingUi {
                 Phase::Recording | Phase::Paused | Phase::Finishing => {
                     if button(ui, "■ Stop", 84.0, Some(pal.green), !finishing, "Stop and open in the Editor (Enter, Shift+F10)", None) { self.stop(); }
                     let paused = self.phase == Phase::Paused;
-                    if button(ui, if paused { "▶ Resume" } else { "❚❚ Pause" }, 96.0, None, !finishing, "Pause / resume (Space, Shift+F9)", None) { self.toggle_pause(); }
+                    if button(ui, if paused { "▶ Resume" } else { "|Pause" }, 96.0, None, !finishing, "Pause / resume (Space, Shift+F9)", None) { self.toggle_pause(); }
                     if self.mic {
                         let muted = self.mic_muted;
                         let tip = format!("{} the microphone (M, {})", if muted { "Unmute" } else { "Mute" }, self.mute_hotkey);
@@ -461,6 +468,11 @@ impl RecordingUi {
                     if button(ui, "Draw", 58.0, if drawing { Some(pal.product) } else { None }, !finishing, &tip, None) { self.toggle_draw(); }
                 }
             }
+            // Status text in whatever room the buttons left, clipped so it never runs under them.
+            let text_clip = Rect::from_min_max(panel.min, Pos2::new(x - 4.0, panel.bottom()));
+            let tp = painter.with_clip_rect(text_clip);
+            tp.text(Pos2::new(panel.left() + 40.0, panel.center().y - 9.0), Align2::LEFT_CENTER, &title, crate::theme::medium(13.0), pal.text_bright);
+            tp.text(Pos2::new(panel.left() + 40.0, panel.center().y + 9.0), Align2::LEFT_CENTER, sub_text, FontId::proportional(11.5), sub_color);
         });
         ctx.request_repaint_after(Duration::from_millis(if self.phase == Phase::Ready { 250 } else { 100 }));
     }
@@ -484,31 +496,39 @@ impl RecordingUi {
             };
             painter.text(Pos2::new(panel.left() + 26.0, panel.center().y), Align2::LEFT_CENTER, text, crate::theme::medium(12.5), pal.text_bright);
             let mut x = panel.right() - 6.0;
-            let mut glyph = |ui: &mut egui::Ui, label: &str, tip: &str, accent: Option<Color32>, enabled: bool| -> bool {
+            let mut glyph = |ui: &mut egui::Ui, id: &str, tip: &str, accent: Option<Color32>, enabled: bool, draw: &dyn Fn(&egui::Painter, Rect, Color32)| -> bool {
                 x -= 30.0;
                 let r = Rect::from_min_size(Pos2::new(x, panel.center().y - 13.0), Vec2::new(28.0, 26.0));
                 x -= 4.0;
-                let resp = ui.interact(r, ui.id().with(label), if enabled { Sense::click() } else { Sense::hover() });
+                let resp = ui.interact(r, ui.id().with(id), if enabled { Sense::click() } else { Sense::hover() });
                 let fill = match (accent, resp.hovered() && enabled) { (Some(c), true) => c.gamma_multiply(1.15), (Some(c), false) => c, (None, true) => pal.control_bright, (None, false) => pal.control };
                 ui.painter().rect_filled(r, 5.0, if enabled { fill } else { pal.control_dark });
-                ui.painter().text(r.center(), Align2::CENTER_CENTER, label, FontId::proportional(12.0), if accent.is_some() { Color32::WHITE } else { pal.text_bright });
+                draw(ui.painter(), r.shrink(8.0), if accent.is_some() { Color32::WHITE } else { pal.text_bright });
                 enabled && resp.on_hover_text(tip).clicked()
             };
+            let cross = |p: &egui::Painter, r: Rect, c: Color32| { p.line_segment([r.left_top(), r.right_bottom()], Stroke::new(2.0_f32, c)); p.line_segment([r.right_top(), r.left_bottom()], Stroke::new(2.0_f32, c)); };
+            let circle = |p: &egui::Painter, r: Rect, c: Color32| { p.circle_filled(r.center(), r.width() / 2.0, c); };
+            let square = |p: &egui::Painter, r: Rect, c: Color32| { p.rect_filled(r, 1.0, c); };
+            let pause = |p: &egui::Painter, r: Rect, c: Color32| { p.rect_filled(Rect::from_min_max(r.left_top(), Pos2::new(r.left() + r.width() * 0.38, r.bottom())), 1.0, c); p.rect_filled(Rect::from_min_max(Pos2::new(r.right() - r.width() * 0.38, r.top()), r.right_bottom()), 1.0, c); };
+            let play = |p: &egui::Painter, r: Rect, c: Color32| { p.add(egui::Shape::convex_polygon(vec![r.left_top(), Pos2::new(r.right(), r.center().y), r.left_bottom()], c, Stroke::NONE)); };
+            let mic_on = |p: &egui::Painter, r: Rect, c: Color32| { p.text(r.center(), Align2::CENTER_CENTER, "M", FontId::proportional(12.0), c); };
+            let mic_off = |p: &egui::Painter, r: Rect, c: Color32| { p.text(r.center(), Align2::CENTER_CENTER, "M", FontId::proportional(12.0), c); p.line_segment([r.left_bottom(), r.right_top()], Stroke::new(2.0_f32, c)); };
+            let pen = |p: &egui::Painter, r: Rect, c: Color32| { p.line_segment([r.left_bottom(), r.right_top()], Stroke::new(2.5_f32, c)); p.circle_filled(r.left_bottom(), 2.0, c); };
             let finishing = self.phase == Phase::Finishing;
-            if glyph(ui, "✕", "Discard the recording (Esc)", None, !finishing) { self.cancel(); }
+            if glyph(ui, "cancel", "Discard the recording (Esc)", None, !finishing, &cross) { self.cancel(); }
             match self.phase {
-                Phase::Ready => { if glyph(ui, "●", "Start recording (Enter)", Some(pal.record), true) { self.begin(); } }
-                Phase::Countdown | Phase::Starting => { let _ = glyph(ui, "●", "", Some(pal.record.gamma_multiply(0.6)), false); }
+                Phase::Ready => { if glyph(ui, "record", "Start recording (Enter)", Some(pal.record), true, &circle) { self.begin(); } }
+                Phase::Countdown | Phase::Starting => { let _ = glyph(ui, "record", "", Some(pal.record.gamma_multiply(0.6)), false, &circle); }
                 _ => {
-                    if glyph(ui, "■", "Stop and open in the Editor (Enter)", Some(pal.green), !finishing) { self.stop(); }
+                    if glyph(ui, "stop", "Stop and open in the Editor (Enter)", Some(pal.green), !finishing, &square) { self.stop(); }
                     let paused = self.phase == Phase::Paused;
-                    if glyph(ui, if paused { "▶" } else { "❚❚" }, "Pause / resume (Space)", None, !finishing) { self.toggle_pause(); }
+                    if glyph(ui, "pause", "Pause / resume (Space)", None, !finishing, if paused { &play } else { &pause }) { self.toggle_pause(); }
                     if self.mic {
                         let muted = self.mic_muted;
-                        if glyph(ui, if muted { "M̶" } else { "M" }, if muted { "Unmute the microphone (M)" } else { "Mute the microphone (M)" }, if muted { Some(pal.capture_red) } else { None }, !finishing) { self.toggle_mic_mute(); }
+                        if glyph(ui, "mic", if muted { "Unmute the microphone (M)" } else { "Mute the microphone (M)" }, if muted { Some(pal.capture_red) } else { None }, !finishing, if muted { &mic_off } else { &mic_on }) { self.toggle_mic_mute(); }
                     }
                     let drawing = self.draw.as_ref().map(|d| d.active).unwrap_or(false);
-                    if glyph(ui, "✎", "Screen Draw (D)", if drawing { Some(pal.product) } else { None }, !finishing) { self.toggle_draw(); }
+                    if glyph(ui, "draw", "Screen Draw (D)", if drawing { Some(pal.product) } else { None }, !finishing, &pen) { self.toggle_draw(); }
                 }
             }
         });

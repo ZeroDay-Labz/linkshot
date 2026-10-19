@@ -172,6 +172,7 @@ impl QuickStyle {
             ToolMode::Text => { q.foreground_color = Argb::TRANSPARENT; q.background_color = Argb::TRANSPARENT; q.text_selection_color = Argb::BLACK; q.font_size = 24.0; }
             ToolMode::Callouts => { q.stroke_width = 4.0; q.foreground_color = Argb::TRANSPARENT; q.background_color = Argb::rgb(0xFC, 0x42, 0x42); q.drop_shadow_enabled = true; }
             ToolMode::Step => { q.foreground_color = Argb::WHITE; q.background_color = Argb::rgb(0xFC, 0x42, 0x42); q.font_size = 16.0; q.stroke_width = 32.0; }
+            ToolMode::Stamp => { q.stroke_width = 96.0; q.opacity = 100.0; }
             ToolMode::Pen => { q.stroke_width = 4.0; }
             ToolMode::Line => { q.stroke_width = 4.0; q.arrow_start = ArrowLineEndType::Flat; q.arrow_end = ArrowLineEndType::Flat; }
             ToolMode::Blur => { q.blur_intensity = 50.0; }
@@ -350,7 +351,7 @@ impl ToolBarItem {
     pub fn default_toolbar() -> Vec<ToolBarItem> {
         vec![
             Self::spacer(), Self::tool(ToolMode::Favorites), Self::tool(ToolMode::Arrow), Self::tool(ToolMode::Text),
-            Self::tool(ToolMode::Callouts), Self::tool(ToolMode::Shape), Self::tool(ToolMode::Step), Self::tool(ToolMode::Fill),
+            Self::tool(ToolMode::Callouts), Self::tool(ToolMode::Shape), Self::tool(ToolMode::Stamp), Self::tool(ToolMode::Step), Self::tool(ToolMode::Fill),
             Self::tool(ToolMode::VectorSelection), Self::more(), Self::command(ToolBarCommandType::Undo),
             Self::command(ToolBarCommandType::Redo), Self::spacer(),
         ]
