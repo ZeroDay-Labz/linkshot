@@ -80,6 +80,8 @@ pub struct App {
     last_save: Instant,
     pub show_prefs: bool,
     pub show_about: bool,
+    /// First-run question: make LinkShot the system's screenshot tool (Print Screen).
+    pub show_default_prompt: bool,
     pub status: Option<(String, Instant)>,
     interval_timer: Option<(CaptureSettings, Instant, Option<image::RgbaImage>)>,
 }
@@ -151,20 +153,59 @@ impl App {
             last_save: Instant::now(),
             show_prefs: false,
             show_about: false,
+            show_default_prompt: false,
             status: None,
             interval_timer: None,
         };
         app.register_hotkeys();
         if let Some(e) = app.hotkeys.error.clone() { tracing::warn!("{e}"); }
         #[cfg(target_os = "linux")]
-        if headless_dark.is_none() && linkshot_capture::is_wayland() && linkshot_capture::kwin::is_kde() {
+        if headless_dark.is_none() && linkshot_capture::kwin::is_kde() && std::env::var_os("FLATPAK_ID").is_none() {
+            // The desktop file authorises KWin's ScreenShot2 interface and carries the "capture" action
+            // that the system-wide Print Screen shortcut launches (see `default_tool`).
             match linkshot_capture::kwin::ensure_authorization("LinkShot", "linkshot") {
                 Ok(true) => tracing::info!("installed desktop file for KWin screenshot authorisation"),
                 Ok(false) => {}
                 Err(e) => tracing::warn!("could not install desktop file: {e}"),
             }
         }
+        if headless_dark.is_none() && !background && !app.settings.default_tool_prompted && linkshot_platform::default_tool::supported() {
+            app.show_default_prompt = true;
+        }
         app
+    }
+
+    /// Binds Print Screen to LinkShot system-wide (and starts LinkShot at login); see `default_tool`.
+    pub fn make_default_tool(&mut self) {
+        let id = linkshot_platform::default_tool::Identity::detect();
+        match linkshot_platform::default_tool::make_default(&id) {
+            Ok(report) => {
+                self.settings.system_print_screen = true;
+                self.settings.run_at_startup = true;
+                self.set_status("LinkShot is now your screenshot tool: press Print Screen (Fn+PrtSc on compact keyboards) to capture");
+                for step in report.steps { tracing::info!("{step}"); }
+            }
+            Err(e) => {
+                tracing::warn!("make default: {e:#}");
+                self.settings.system_print_screen = false;
+                self.set_status(format!("Could not take over Print Screen: {e:#}"));
+            }
+        }
+        self.settings.default_tool_prompted = true;
+        self.mark_settings_dirty();
+        self.register_hotkeys();
+    }
+
+    /// Gives the Print Screen key back to the desktop.
+    pub fn undo_default_tool(&mut self) {
+        let id = linkshot_platform::default_tool::Identity::detect();
+        match linkshot_platform::default_tool::undo(&id) {
+            Ok(_) => self.set_status("Print Screen is no longer bound to LinkShot system-wide"),
+            Err(e) => self.set_status(format!("Could not release Print Screen: {e:#}")),
+        }
+        self.settings.system_print_screen = false;
+        self.mark_settings_dirty();
+        self.register_hotkeys();
     }
 
     pub fn mark_presets_dirty(&mut self) { self.presets_dirty = true; }
@@ -190,6 +231,11 @@ impl App {
             (self.settings.hotkey_draw_mode.clone(), HotkeyEvent::DrawMode),
         ];
         for p in &self.presets.presets { b.push((p.hot_key.clone(), HotkeyEvent::Preset(p.id.clone()))); }
+        // When the desktop itself launches `linkshot --capture` on Print Screen, claiming the key here too
+        // would conflict (Linux); on Windows the in-app registration is what receives the key.
+        if self.settings.system_print_screen && cfg!(target_os = "linux") {
+            b.retain(|(hk, _)| !matches!(hk.key.as_str(), "PrintScreen" | "Snapshot") || hk.ctrl || hk.alt || hk.shift || hk.win);
+        }
         self.hotkeys.apply(&b);
     }
 

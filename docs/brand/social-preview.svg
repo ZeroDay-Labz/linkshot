@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#101723"/>
+      <stop offset="1" stop-color="#1b2a3d"/>
+    </linearGradient>
+    <linearGradient id="orange" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff7a1a"/>
+      <stop offset="1" stop-color="#ffb347"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="640" fill="url(#bg)"/>
+  <!-- crosshair + selection rectangle motif -->
+  <g opacity="0.22" stroke="#ff8c2a" stroke-width="3" fill="none">
+    <rect x="860" y="150" width="330" height="330" stroke-dasharray="14 10"/>
+    <line x1="1025" y1="60" x2="1025" y2="590"/>
+    <line x1="760" y1="315" x2="1260" y2="315"/>
+  </g>
+  <g>
+    <rect x="845" y="135" width="24" height="24" rx="3" fill="#ff8c2a"/>
+    <rect x="1181" y="135" width="24" height="24" rx="3" fill="#ff8c2a"/>
+    <rect x="845" y="471" width="24" height="24" rx="3" fill="#ff8c2a"/>
+    <rect x="1181" y="471" width="24" height="24" rx="3" fill="#ff8c2a"/>
+    <rect x="905" y="120" width="140" height="30" rx="6" fill="#ff8c2a"/>
+    <text x="975" y="142" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="18" font-weight="600" fill="#101723" text-anchor="middle">1360 × 850</text>
+  </g>
+  <!-- logo -->
+  <g transform="translate(96 150)">
+    <circle cx="80" cy="80" r="76" fill="#2C7CB2"/>
+    <circle cx="80" cy="80" r="48" fill="none" stroke="#FFFFFF" stroke-width="10"/>
+    <circle cx="80" cy="80" r="23" fill="#FFFFFF"/>
+  </g>
+  <text x="300" y="220" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="92" font-weight="700" fill="#FFFFFF">LinkShot</text>
+  <text x="302" y="282" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="30" fill="#c7d2e0">Screen capture, scrolling capture, video recording</text>
+  <text x="302" y="324" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="30" fill="#c7d2e0">and an image editor for Linux and Windows</text>
+  <!-- feature chips -->
+  <g font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="22" font-weight="600" fill="#FFFFFF">
+    <rect x="96" y="400" width="190" height="48" rx="24" fill="#2C7CB2"/><text x="191" y="432" text-anchor="middle">Print Screen</text>
+    <rect x="300" y="400" width="250" height="48" rx="24" fill="#2C7CB2"/><text x="425" y="432" text-anchor="middle">Scrolling capture</text>
+    <rect x="564" y="400" width="200" height="48" rx="24" fill="#2C7CB2"/><text x="664" y="432" text-anchor="middle">GIF and MP4</text>
+    <rect x="96" y="464" width="170" height="48" rx="24" fill="url(#orange)"/><text x="181" y="496" text-anchor="middle" fill="#101723">Grab Text</text>
+    <rect x="280" y="464" width="300" height="48" rx="24" fill="#2b3b52"/><text x="430" y="496" text-anchor="middle">Nothing else to install</text>
+  </g>
+  <text x="96" y="580" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="24" fill="#8fa3bb">github.com/ZeroDay-Labz/linkshot  ·  Rust  ·  MIT or Apache-2.0</text>
+</svg>

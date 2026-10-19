@@ -22,6 +22,13 @@ const INDEX_MAGIC: &[u8; 4] = b"LSVI";
 const HEADER_LEN: u64 = 20;
 const RECORD_HEADER_LEN: u64 = 9;
 /// A key frame at least this often (frames).
+/// Bytes of one RGBA frame, refusing absurd sizes from a damaged header (> 1 GiB).
+fn frame_len(width: u32, height: u32) -> Result<usize> {
+    let n = width as u64 * height as u64 * 4;
+    ensure!(width > 0 && height > 0 && n <= 1 << 30, "frame size {width}x{height} out of range");
+    Ok(n as usize)
+}
+
 pub const KEY_INTERVAL: u32 = 90;
 const KIND_KEY: u8 = 0;
 const KIND_DELTA: u8 = 1;
@@ -83,7 +90,7 @@ impl SpoolWriter {
 
     /// Appends a frame. `rgba` must be `width * height * 4` bytes; timestamps must not decrease.
     pub fn push(&mut self, pts_ms: u32, rgba: &[u8]) -> Result<()> {
-        let frame_len = (self.width * self.height * 4) as usize;
+        let frame_len = frame_len(self.width, self.height)?;
         ensure!(rgba.len() == frame_len, "frame is {} bytes, expected {}", rgba.len(), frame_len);
         if let Some(last) = self.last_pts() { ensure!(pts_ms >= last, "timestamps must not decrease ({pts_ms} < {last})"); }
         let key = self.prev.is_empty() || self.since_key >= KEY_INTERVAL;
@@ -154,7 +161,7 @@ fn duration_from_index(index: &[FrameIndex], fps_hint: u32) -> u32 {
         1 => index[0].pts_ms + if fps_hint > 0 { 1000 / fps_hint } else { 100 },
         n => {
             let last = index[n - 1].pts_ms;
-            let avg = (last - index[0].pts_ms) / (n as u32 - 1);
+            let avg = last.saturating_sub(index[0].pts_ms) / (n as u32 - 1);
             last + avg.max(1)
         }
     }
@@ -210,7 +217,7 @@ impl SpoolReader {
         ensure!(len == f.len as usize, "record {i}: length mismatch");
         self.comp.resize(len, 0);
         self.file.read_exact(&mut self.comp)?;
-        let frame_len = (self.width * self.height * 4) as usize;
+        let frame_len = frame_len(self.width, self.height)?;
         self.scratch.resize(frame_len, 0);
         let n = lz4_flex::block::decompress_into(&self.comp, &mut self.scratch).map_err(|e| anyhow::anyhow!("record {i}: lz4: {e}"))?;
         ensure!(n == frame_len, "record {i}: decoded {n} bytes, expected {frame_len}");
@@ -225,7 +232,7 @@ impl SpoolReader {
             Some(c) if c < i && !(c + 1..=i).any(|k| self.index[k].key) => c + 1,
             _ => (0..=i).rev().find(|k| self.index[*k].key).unwrap_or(0),
         };
-        let frame_len = (self.width * self.height * 4) as usize;
+        let frame_len = frame_len(self.width, self.height)?;
         for k in start..=i {
             let key = self.read_record(k)?;
             if key || self.buf.len() != frame_len {

@@ -131,7 +131,10 @@ pub mod tesseract {
         // Tesseract likes ~30 px text; upscale small captures (it works on 300 dpi scans).
         let scale = if w.max(h) < 1600 { 2.0 } else { 1.0 };
         let rgb = if scale != 1.0 { image::imageops::resize(&rgb, (w as f32 * scale) as u32, (h as f32 * scale) as u32, image::imageops::FilterType::CatmullRom) } else { rgb };
-        let dir = std::env::temp_dir().join(format!("linkshot-ocr-{}", std::process::id()));
+        let dir = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from).filter(|p| p.is_dir()).unwrap_or_else(std::env::temp_dir).join(format!("linkshot-ocr-{}", std::process::id()));
+        #[cfg(unix)]
+        { use std::os::unix::fs::DirBuilderExt; std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir)?; }
+        #[cfg(not(unix))]
         std::fs::create_dir_all(&dir)?;
         let png = dir.join("in.png");
         rgb.save(&png)?;

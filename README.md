@@ -1,10 +1,28 @@
-# LinkShot
+<p align="center">
+  <img src="assets/linkshot.svg" width="96" alt="">
+</p>
 
-Screen capture, scrolling capture, video recording, text extraction and an image editor for
-**Linux and Windows**, written in Rust. Every download is self-contained: video export (ffmpeg) and
-text recognition (Tesseract) ship inside the package, so nothing else has to be installed.
+<h1 align="center">LinkShot</h1>
 
-LinkShot is developed by [ZeroDay-Labz](https://github.com/ZeroDay-Labz) and licensed under MIT OR Apache-2.0.
+<p align="center">
+  Screen capture, scrolling capture, video recording, text extraction and an image editor for
+  <b>Linux and Windows</b>. Press Print Screen, pick a region, done.
+</p>
+
+<p align="center">
+  <a href="https://github.com/ZeroDay-Labz/linkshot/releases/latest"><img src="https://img.shields.io/github/v/release/ZeroDay-Labz/linkshot?color=2C7CB2" alt="Latest release"></a>
+  <a href="https://github.com/ZeroDay-Labz/linkshot/actions/workflows/ci.yml"><img src="https://github.com/ZeroDay-Labz/linkshot/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/ZeroDay-Labz/linkshot/releases"><img src="https://img.shields.io/github/downloads/ZeroDay-Labz/linkshot/total?color=ff8c2a" alt="Downloads"></a>
+  <a href="LICENSE-MIT"><img src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-a6e3a1" alt="MIT OR Apache-2.0 license"></a>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/editor.png" alt="LinkShot Editor with a capture, the tool bar and the recent-captures tray" width="820">
+</p>
+
+Every download is self-contained: video export (ffmpeg) and text recognition (Tesseract) ship inside the
+package, so nothing else has to be installed. LinkShot is developed by
+[ZeroDay-Labz](https://github.com/ZeroDay-Labz) and licensed under MIT OR Apache-2.0.
 
 ## Download
 
@@ -12,7 +30,7 @@ Releases are on the [Releases](https://github.com/ZeroDay-Labz/linkshot/releases
 
 | Platform | File | Install |
 | --- | --- | --- |
-| Windows 10/11 (x64) | `LinkShot-<version>-windows-x64.exe` | Run it. The first start unpacks the bundled tools into `%LOCALAPPDATA%\LinkShot\tools`. |
+| Windows 10/11 (x64) | `LinkShot-<version>-windows-x64.exe` | Run it. The first start unpacks the bundled tools into `%LOCALAPPDATA%\LinkShot\tools`. Windows SmartScreen may warn because the file is not code-signed; choose *More info ▸ Run anyway*. |
 | Fedora / RHEL / openSUSE | `linkshot-<version>.x86_64.rpm` | `sudo dnf install ./linkshot-<version>.x86_64.rpm` |
 | Debian / Ubuntu / Mint | `linkshot_<version>_amd64.deb` | `sudo apt install ./linkshot_<version>_amd64.deb` |
 | Any Linux (Flatpak) | `LinkShot-<version>.flatpak` | `flatpak install --user LinkShot-<version>.flatpak` (needs the Flathub remote for the runtime) |
@@ -46,6 +64,11 @@ Releases are on the [Releases](https://github.com/ZeroDay-Labz/linkshot/releases
   (SNAGX, PNG, JPG, GIF, BMP, TIF, WebP, ICO); share to File / Clipboard / Program / Email. Dark mode is the
   default (View ▸ Theme), the UI uses the bundled Inter font and renders at the display's native pixel
   density.
+* **Print Screen, system-wide**: on first start LinkShot offers to become the default screenshot tool.
+  On KDE Plasma and GNOME the desktop then launches a LinkShot capture on Print Screen even when LinkShot
+  is closed (Spectacle's or the Shell's Print binding is cleared; other shortcuts are kept), and on Windows
+  the "Print screen key opens Snipping Tool" option is turned off. LinkShot also starts at login. On compact
+  keyboards the key is Fn+PrtSc. Preferences ▸ Capture has the switch.
 * **Desktop integration**: global hotkeys (X11 and Windows natively; Wayland through the GlobalShortcuts
   portal), tray icon (left click opens the Capture window, middle click captures), one instance per user
   (launching again raises the running Capture window; `linkshot --capture` starts a capture from a script),
@@ -55,13 +78,15 @@ Releases are on the [Releases](https://github.com/ZeroDay-Labz/linkshot/releases
 Not yet: audio and webcam in recordings, stamps, Simplify, Magic Wand, Cut Out, Eraser, templates, cloud
 share destinations, printing.
 
-## Screenshots (rendered headlessly from the real code)
+## Screenshots
 
-| Capture window | Editor |
-| --- | --- |
-| ![capture](docs/screenshots/capture_window_image.png) | ![editor](docs/screenshots/editor.png) |
-
-![scrolling HUD](docs/screenshots/scrolling_hud.png) ![Grab Text results](docs/screenshots/grab_text_results.png)
+<p align="center">
+  <img src="docs/screenshots/capture_window_image.png" alt="Capture window, Image tab" width="49%">
+  <img src="docs/screenshots/grab_text_results.png" alt="Grab Text results" width="49%">
+</p>
+<p align="center">
+  <img src="docs/screenshots/scrolling_hud.png" alt="Scrolling capture toolbar" width="820">
+</p>
 
 ## Building from source
 
@@ -92,4 +117,7 @@ flatpak build-bundle packaging/flatpak/repo dist/LinkShot-<version>.flatpak io.g
 A system `ffmpeg` or `tesseract` is used when the bundle is missing (development builds), and
 `LINKSHOT_FFMPEG` / `LINKSHOT_TESSERACT` / `LINKSHOT_TOOLS` override the lookup.
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the crate layout and the window model.
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the crate layout and the window model, and
+[`docs/IMPROVEMENT-PLAN.md`](docs/IMPROVEMENT-PLAN.md) for the prioritised list of known problems and planned work.
+
+`cargo run -p linkshot-capture --example defaulttool -- status|make|undo` inspects or changes the system-wide Print Screen binding without the GUI.

@@ -66,6 +66,11 @@ pub struct Settings {
     pub theme_generation: u32,
     pub language: String,
     pub run_at_startup: bool,
+    /// The "make LinkShot your default screenshot tool" question was answered (or dismissed for good).
+    pub default_tool_prompted: bool,
+    /// Print Screen is bound to LinkShot by the desktop itself (see `linkshot_platform::default_tool`), so the
+    /// in-app hotkey must not claim it too.
+    pub system_print_screen: bool,
     pub capture_interface: CaptureInterface,
     pub auto_check_updates: bool,
     pub show_onboarding: bool,
@@ -170,6 +175,8 @@ impl Default for Settings {
             theme_generation: 2,
             language: "en-US".into(),
             run_at_startup: false,
+            default_tool_prompted: false,
+            system_print_screen: false,
             capture_interface: CaptureInterface::CaptureWindow,
             auto_check_updates: false,
             show_onboarding: true,
@@ -295,15 +302,36 @@ impl Paths {
     }
 }
 
+/// Writes `bytes` to `path` through a temporary file and a rename, so a crash never leaves a
+/// half-written settings or presets file behind.
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
+    if let Some(p) = path.parent() { std::fs::create_dir_all(p)?; }
+    let tmp = path.with_extension(format!("{}.tmp-{}", path.extension().and_then(|e| e.to_str()).unwrap_or("json"), std::process::id()));
+    std::fs::write(&tmp, bytes)?;
+    std::fs::rename(&tmp, path)?;
+    Ok(())
+}
+
+/// A file that failed to parse is kept aside as `<name>.broken-<unix time>` instead of being
+/// overwritten by the next autosave; the user keeps a chance to recover it.
+pub fn keep_broken(path: &Path, error: &str) {
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let aside = path.with_extension(format!("{}.broken-{stamp}", path.extension().and_then(|e| e.to_str()).unwrap_or("json")));
+    tracing::warn!("{} could not be parsed ({error}); keeping it as {} and starting from defaults", path.display(), aside.display());
+    let _ = std::fs::rename(path, &aside);
+}
+
 impl Settings {
     pub fn load(path: &Path) -> Settings {
-        let mut s: Settings = std::fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        let mut s: Settings = match std::fs::read(path) {
+            Ok(b) => match serde_json::from_slice(&b) { Ok(s) => s, Err(e) => { keep_broken(path, &e.to_string()); Settings::default() } },
+            Err(_) => Settings::default(),
+        };
         if s.theme_generation < 2 { s.ui_theme = UiTheme::Dark; s.theme_generation = 2; }
         s
     }
     pub fn save(&self, path: &Path) -> anyhow::Result<()> {
-        if let Some(p) = path.parent() { std::fs::create_dir_all(p)?; }
-        Ok(std::fs::write(path, serde_json::to_string_pretty(self)?)?)
+        write_atomic(path, serde_json::to_string_pretty(self)?.as_bytes())
     }
     pub fn library_dir(&self, paths: &Paths) -> PathBuf {
         self.library_directory.clone().unwrap_or_else(|| paths.default_library_dir.clone())

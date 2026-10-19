@@ -75,7 +75,7 @@ pub fn library_file_name(dir: &Path, when: DateTime<Local>, ext: &str) -> PathBu
 pub fn sanitize(s: &str) -> String {
     let mut out: String = s.chars().map(|c| if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') || c.is_control() { '_' } else { c }).collect();
     out = out.trim().trim_end_matches('.').to_string();
-    if out.len() > 120 { out.truncate(120); }
+    if out.chars().count() > 120 { let cut = out.char_indices().nth(120).map(|(i, _)| i).unwrap_or(out.len()); out.truncate(cut); }
     out
 }
 

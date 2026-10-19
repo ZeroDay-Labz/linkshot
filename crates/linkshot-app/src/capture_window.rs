@@ -24,6 +24,38 @@ const PRESET_ROW: f32 = 30.0;
 
 impl App {
     /// The Capture window is sized to its content: the Image/Video tabs are wider than All-in-One.
+    /// "Make LinkShot your default screenshot tool?" shown once on first start.
+    fn default_tool_prompt(&mut self, ctx: &egui::Context) {
+        let mut choice: Option<u8> = None;
+        egui::Window::new("Make LinkShot your screenshot tool?")
+            .collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.set_width(380.0);
+                ui.label("Press Print Screen anywhere to capture with LinkShot, even when it is not running. LinkShot will also start when you log in.");
+                ui.add_space(4.0);
+                ui.label(egui::RichText::new(match linkshot_platform::default_tool::desktop() {
+                    linkshot_platform::default_tool::Desktop::Kde => "On KDE Plasma this replaces the Print Screen shortcut of Spectacle (your other Spectacle shortcuts are kept).",
+                    linkshot_platform::default_tool::Desktop::Gnome => "On GNOME this replaces the Shell's Print Screen shortcuts.",
+                    linkshot_platform::default_tool::Desktop::Windows => "On Windows this turns off \"Use the Print screen key to open Snipping Tool\".",
+                    _ => "",
+                }).small());
+                ui.label(egui::RichText::new("On compact keyboards the key is Fn + PrtSc.").small());
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button(egui::RichText::new("Use Print Screen").strong()).clicked() { choice = Some(1); }
+                    if ui.button("Not now").clicked() { choice = Some(2); }
+                    if ui.button("Don't ask again").clicked() { choice = Some(3); }
+                });
+                ui.label(egui::RichText::new("You can change this later in Preferences.").small());
+            });
+        match choice {
+            Some(1) => { self.show_default_prompt = false; self.make_default_tool(); }
+            Some(2) => { self.show_default_prompt = false; }
+            Some(3) => { self.show_default_prompt = false; self.settings.default_tool_prompted = true; self.mark_settings_dirty(); }
+            _ => {}
+        }
+    }
+
     pub fn capture_window_size(&self) -> egui::Vec2 {
         let w = match self.presets.selected_mode { CaptureMode::CaptureModeAllInOne => if self.capture.all_in_one_expanded { 700.0 } else { 560.0 }, _ => 700.0 };
         let presets_h = if self.capture.presets_expanded { (self.presets.presets.len() as f32 * PRESET_ROW).min(240.0) + 2.0 } else { 0.0 };
@@ -33,6 +65,7 @@ impl App {
     pub fn capture_window_ui(&mut self, ctx: &egui::Context) {
         let pal = self.pal;
         let mut actions: Vec<Action> = Vec::new();
+        if self.show_default_prompt { self.default_tool_prompt(ctx); }
         let wanted = self.capture_window_size();
         if (ctx.content_rect().size() - wanted).length() > 1.0 && !ctx.input(|i| i.viewport().minimized.unwrap_or(false)) {
             ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(wanted));

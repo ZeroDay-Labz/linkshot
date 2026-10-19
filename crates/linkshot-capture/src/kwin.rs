@@ -125,7 +125,7 @@ pub fn ensure_authorization(app_name: &str, desktop_id: &str) -> Result<bool> {
     std::fs::create_dir_all(&dir)?;
     let path = dir.join(format!("{desktop_id}.desktop"));
     let icon = std::env::var("LINKSHOT_ICON").ok().unwrap_or_else(|| "camera-photo".into());
-    let content = format!("[Desktop Entry]\nType=Application\nName={app_name}\nComment=Screen capture and editor\nExec={} %U\nTryExec={}\nIcon={icon}\nTerminal=false\nCategories=Graphics;Utility;\nStartupWMClass=linkshot\nX-KDE-DBUS-Restricted-Interfaces=org.kde.KWin.ScreenShot2\n", exe.display(), exe.display());
+    let content = format!("[Desktop Entry]\nType=Application\nName={app_name}\nComment=Screen capture and editor\nExec={} %U\nTryExec={}\nIcon={icon}\nTerminal=false\nCategories=Graphics;Utility;\nStartupWMClass=linkshot\nX-KDE-DBUS-Restricted-Interfaces=org.kde.KWin.ScreenShot2\nActions=capture;\n\n[Desktop Action capture]\nName=Capture now\nExec={} --capture\n", exe.display(), exe.display(), exe.display());
     if std::fs::read_to_string(&path).map(|c| c == content).unwrap_or(false) { return Ok(false); }
     std::fs::write(&path, content)?;
     // Refresh the KService cache so KWin sees the new desktop file.
@@ -142,8 +142,10 @@ struct LoadedScript { conn: zbus::blocking::Connection, path: std::path::PathBuf
 
 impl LoadedScript {
     fn load(script: &str) -> Result<Self> {
-        let dir = std::env::temp_dir().join(format!("linkshot-kwin-{}", std::process::id()));
-        std::fs::create_dir_all(&dir)?;
+        // KWin executes this file: keep it in the private runtime dir (0700), never a shared /tmp path.
+        let base = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from).filter(|p| p.is_dir()).unwrap_or_else(std::env::temp_dir);
+        let dir = base.join(format!("linkshot-kwin-{}", std::process::id()));
+        { use std::os::unix::fs::DirBuilderExt; std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir)?; }
         static SEQ: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         let path = dir.join(format!("script-{}.js", SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
         std::fs::write(&path, script)?;

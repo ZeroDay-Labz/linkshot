@@ -1096,6 +1096,7 @@ fn dialogs(app: &mut App, ctx: &egui::Context, actions: &mut Vec<Action>) {
 }
 
 fn preferences_window(app: &mut App, ctx: &egui::Context, _actions: &mut Vec<Action>) {
+    let mut default_tool_action: Option<bool> = None;
     let mut open = true;
     let mut changed = false;
     let mut theme_changed = false;
@@ -1111,10 +1112,18 @@ fn preferences_window(app: &mut App, ctx: &egui::Context, _actions: &mut Vec<Act
             changed |= ui.checkbox(&mut s.show_magnifier, "Show magnifier").changed();
             changed |= ui.checkbox(&mut s.simplified_crosshairs, "Simplified crosshairs").changed();
             changed |= ui.checkbox(&mut s.show_video_guides, "Show video guides").changed();
-            changed |= ui.checkbox(&mut s.run_at_startup, "Run linkshot when the system starts").changed();
+            changed |= ui.checkbox(&mut s.run_at_startup, "Run LinkShot when the system starts").changed();
             ui.label(egui::RichText::new("Hotkeys").strong());
-            ui.label(format!("Show/hide: {}    Repeat last capture: {}", s.hotkey_show_hide.display(), s.hotkey_repeat_last.display()));
+            ui.label(format!("Capture: {}    Show/hide: {}    Repeat last capture: {}", app.presets.global_hot_key.display(), s.hotkey_show_hide.display(), s.hotkey_repeat_last.display()));
             if let Some(e) = &app.hotkeys.error { ui.label(egui::RichText::new(e).small()); }
+            ui.label(egui::RichText::new("Default screenshot tool").strong());
+            if s.system_print_screen {
+                ui.label("Print Screen starts a LinkShot capture system-wide (Fn+PrtSc on compact keyboards).");
+                if ui.button("Give Print Screen back to the desktop").clicked() { default_tool_action = Some(false); }
+            } else {
+                ui.label("Print Screen is handled by the desktop's own screenshot tool; LinkShot only gets it while it runs and the desktop allows it.");
+                if ui.button("Make LinkShot the default screenshot tool").clicked() { default_tool_action = Some(true); }
+            }
         });
         ui.collapsing("Video", |ui| {
             ui.horizontal(|ui| {
@@ -1171,4 +1180,5 @@ fn preferences_window(app: &mut App, ctx: &egui::Context, _actions: &mut Vec<Act
     if theme_changed { app.apply_theme(ctx); changed = true; let _ = linkshot_platform::autostart::set_enabled(app.settings.run_at_startup); }
     if changed { app.mark_settings_dirty(); let _ = linkshot_platform::autostart::set_enabled(app.settings.run_at_startup); }
     if !open { app.show_prefs = false; }
+    match default_tool_action { Some(true) => app.make_default_tool(), Some(false) => app.undo_default_tool(), None => {} }
 }

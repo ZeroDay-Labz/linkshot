@@ -436,12 +436,16 @@ impl SavedPresets {
             CaptureMode::CaptureModeVideo => &mut self.video,
         }
     }
+    /// Missing file → error (caller uses defaults); unparseable file → kept aside, error.
     pub fn load(path: &std::path::Path) -> anyhow::Result<Self> {
-        Ok(serde_json::from_slice(&std::fs::read(path)?)?)
+        let bytes = std::fs::read(path)?;
+        match serde_json::from_slice(&bytes) {
+            Ok(p) => Ok(p),
+            Err(e) => { crate::settings::keep_broken(path, &e.to_string()); Err(e.into()) }
+        }
     }
     pub fn save(&self, path: &std::path::Path) -> anyhow::Result<()> {
-        if let Some(p) = path.parent() { std::fs::create_dir_all(p)?; }
-        Ok(std::fs::write(path, serde_json::to_string_pretty(self)?)?)
+        crate::settings::write_atomic(path, serde_json::to_string_pretty(self)?.as_bytes())
     }
 
     /// Imports presets from a `.snagpresets` XML file (UTF-16 or UTF-8 XML).

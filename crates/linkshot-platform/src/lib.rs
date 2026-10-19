@@ -75,6 +75,8 @@ pub fn reveal(path: &std::path::Path) -> Result<()> {
     if let Some(parent) = path.parent() { open_path(parent) } else { Ok(()) }
 }
 
+pub mod default_tool;
+
 pub mod autostart {
     //! "Run linkshot when the system starts".
     use anyhow::Result;
@@ -85,8 +87,20 @@ pub mod autostart {
     pub fn is_enabled() -> bool {
         #[cfg(target_os = "linux")]
         { return desktop_file().map(|p| p.exists()).unwrap_or(false); }
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(windows)]
+        { return windows_run_key(&["query", RUN_KEY, "/v", "LinkShot"]).is_ok(); }
+        #[cfg(not(any(target_os = "linux", windows)))]
         { false }
+    }
+
+    #[cfg(windows)]
+    const RUN_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
+    #[cfg(windows)]
+    fn windows_run_key(args: &[&str]) -> Result<()> {
+        use std::os::windows::process::CommandExt;
+        let out = std::process::Command::new("reg").args(args).creation_flags(0x0800_0000).output()?;
+        anyhow::ensure!(out.status.success(), "reg failed: {}", String::from_utf8_lossy(&out.stderr).trim());
+        Ok(())
     }
     pub fn set_enabled(enabled: bool) -> Result<()> {
         #[cfg(target_os = "linux")]
@@ -100,9 +114,14 @@ pub mod autostart {
                 std::fs::remove_file(p)?;
             }
         }
-        #[cfg(target_os = "windows")]
+        #[cfg(windows)]
         {
-            let _ = enabled; // TODO: HKCU\Software\Microsoft\Windows\CurrentVersion\Run
+            if enabled {
+                let exe = std::env::current_exe()?;
+                windows_run_key(&["add", RUN_KEY, "/v", "LinkShot", "/t", "REG_SZ", "/d", &format!("\"{}\" --background", exe.display()), "/f"])?;
+            } else {
+                let _ = windows_run_key(&["delete", RUN_KEY, "/v", "LinkShot", "/f"]);
+            }
         }
         Ok(())
     }

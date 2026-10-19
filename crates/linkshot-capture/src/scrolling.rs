@@ -225,6 +225,8 @@ impl SessionDebug {
 
     fn record_pair(&mut self, st: &Stitcher, p: Push, prev: Option<RgbaImage>, cur: RgbaImage) {
         self.record(st, p);
+        // Frames are screen content: they only go to disk when diagnostics were asked for.
+        if std::env::var_os("LINKSHOT_SCROLL_DEBUG").is_none() { return; }
         if !matches!(p, Push::NoMatch) || self.dumped >= Self::MAX_DUMPS { return; }
         self.dumped += 1;
         let n = self.dumped;
@@ -240,7 +242,8 @@ impl SessionDebug {
     fn finish(mut self, st: &Stitcher, img: Option<&RgbaImage>) {
         self.log.push(format!("done: {} frames, {} accepted, {} px, axis {:?}, static bands {:?}", st.frames, st.accepted(), st.length(), st.axis(), st.static_bands()));
         let dropped = self.log.iter().filter(|l| l.contains("NoMatch")).count();
-        if dropped == 0 && std::env::var_os("LINKSHOT_SCROLL_DEBUG").is_none() { return; }
+        if dropped > 0 { tracing::info!("scrolling capture: {dropped} frame(s) dropped (set LINKSHOT_SCROLL_DEBUG=1 to keep diagnostics)"); }
+        if std::env::var_os("LINKSHOT_SCROLL_DEBUG").is_none() { return; }
         let _ = std::fs::create_dir_all(&self.dir);
         let _ = std::fs::write(self.dir.join("frames.log"), self.log.join("\n") + "\n");
         for w in self.workers.drain(..) { let _ = w.join(); }
