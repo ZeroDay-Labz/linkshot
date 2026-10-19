@@ -26,6 +26,7 @@ finish-args:
   # Prompt-free capture and window placement on KDE Plasma (ScreenShot2 + scripting), tray icon,
   # notifications. Everything else goes through the XDG portals.
   - --talk-name=org.kde.KWin
+  - --talk-name=org.kde.KWin.ScreenShot2
   # "Make LinkShot the default screenshot tool": KDE global shortcuts, and GNOME's gsettings on the host.
   - --talk-name=org.kde.kglobalaccel
   - --talk-name=org.freedesktop.Flatpak

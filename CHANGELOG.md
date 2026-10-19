@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.1 — 2026-10-19
+
+- **Flatpak: overlays landed on the wrong screens.** Inside the sandbox LinkShot was not allowed to own
+  the D-Bus name its KWin helper replies to, and KWin's ScreenShot2 service was not on the talk list,
+  so on a multi-monitor KDE desktop the per-screen overlay windows all stacked on the active screen,
+  each showing another monitor's image, and screenshots went through the slower portal. The helper now
+  uses a name under the app id and the manifest allows `org.kde.KWin.ScreenShot2`. Native packages were
+  not affected.
+- **Interface scale.** egui's built-in keyboard zoom rescaled every LinkShot window whenever Ctrl +/−/0
+  zoomed the Editor canvas. That is off now; View ▸ Interface Scale (or Ctrl+Shift +/−, Ctrl+Shift+0)
+  and a Preferences slider set the interface scale explicitly, on top of each monitor's own scaling.
+- The Editor remembers its window size (and position where the platform reports it) and is fitted to
+  the primary monitor instead of opening larger than the screen.
+
 ## 0.3.0 — 2026-10-19
 
 - **Audio in recordings.** The Video tab records the microphone (device selectable) and system audio

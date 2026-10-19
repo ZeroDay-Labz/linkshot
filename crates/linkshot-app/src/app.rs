@@ -97,6 +97,8 @@ pub struct App {
     pub prefs_hotkey_editing: Option<String>,
     /// First-run question: make LinkShot the system's screenshot tool (Print Screen).
     pub show_default_prompt: bool,
+    /// Logical size of the primary monitor (windows are fitted to it).
+    pub screen_size: Option<(f32, f32)>,
     /// Was the Capture window visible when the current capture started? Only then does it come back.
     pub capture_was_visible: bool,
     /// Preset being edited in place through the tab (Edit in the preset menu).
@@ -174,6 +176,7 @@ impl App {
             prefs_hotkey_editing: None,
             show_about: false,
             show_default_prompt: false,
+            screen_size: linkshot_capture::monitors().ok().and_then(|ms| ms.iter().find(|m| m.is_primary).or(ms.first()).map(|m| (m.width as f32, m.height as f32))),
             capture_was_visible: false,
             editing_preset: None,
             status: None,
@@ -273,7 +276,43 @@ impl App {
     pub fn apply_theme(&mut self, ctx: &egui::Context) {
         self.pal = theme::palette(self.settings.ui_theme);
         theme::apply(ctx, &self.pal);
+        // egui would otherwise rescale every window on Ctrl +/-/0, which the Editor uses for the
+        // canvas; the interface scale is an explicit setting instead (View ▸ Interface Scale).
+        ctx.options_mut(|o| o.zoom_with_keyboard = false);
+        self.apply_ui_scale(ctx);
         SIMPLIFIED_CROSSHAIR.store(self.settings.simplified_crosshairs, Ordering::Relaxed);
+    }
+
+    /// Applies `settings.ui_scale` to every window (the zoom factor is shared by all viewports).
+    pub fn apply_ui_scale(&mut self, ctx: &egui::Context) {
+        let z = self.settings.ui_scale;
+        if !(0.5..=3.0).contains(&z) { self.settings.ui_scale = 1.0; }
+        let z = self.settings.ui_scale;
+        if (ctx.zoom_factor() - z).abs() > 0.001 { ctx.set_zoom_factor(z); }
+    }
+
+    pub fn set_ui_scale(&mut self, ctx: &egui::Context, scale: f32) {
+        self.settings.ui_scale = (scale * 100.0).round() / 100.0;
+        self.settings.ui_scale = self.settings.ui_scale.clamp(0.6, 2.5);
+        self.mark_settings_dirty();
+        self.apply_ui_scale(ctx);
+    }
+
+    /// Default / saved Editor window geometry, kept inside the primary monitor.
+    fn editor_window_geometry(&self) -> (Option<[f32; 2]>, [f32; 2], [f32; 2]) {
+        let (sw, sh) = self.screen_size.unwrap_or((1920.0, 1080.0));
+        let max_w = (sw - 40.0).max(640.0);
+        let max_h = (sh - 80.0).max(480.0);
+        let min = [900.0f32.min(max_w), 600.0f32.min(max_h)];
+        match self.settings.editor_window_rect {
+            Some((x, y, w, h)) => {
+                let w = w.clamp(min[0], max_w);
+                let h = h.clamp(min[1], max_h);
+                let pos = if linkshot_capture::is_wayland() { None } else { Some([x.max(0.0), y.max(0.0)]) };
+                (pos, [w, h], min)
+            }
+            None => (None, [1280.0f32.min(max_w), 820.0f32.min(max_h)], min),
+        }
     }
 
     // ------------------------------------------------------------------ actions
@@ -891,20 +930,32 @@ impl eframe::App for App {
 
         // Editor viewport.
         if self.editor_visible {
+            let (pos, size, min) = self.editor_window_geometry();
             let mut builder = egui::ViewportBuilder::default()
                 .with_title("LinkShot Editor")
                 .with_app_id("linkshot")
                 .with_decorations(false)
-                .with_inner_size([1280.0, 820.0])
-                .with_min_inner_size([900.0, 600.0]);
-            if let Some((x, y, w, h)) = self.settings.editor_window_rect { builder = builder.with_position([x, y]).with_inner_size([w, h]); }
+                .with_inner_size(size)
+                .with_min_inner_size(min);
+            if let Some(p) = pos { builder = builder.with_position(p); }
             let mut close = false;
             let mut actions: Vec<Action> = vec![];
+            let mut seen: Option<(Option<egui::Rect>, Option<egui::Rect>)> = None;
             ctx.show_viewport_immediate(egui::ViewportId::from_hash_of("editor"), builder, |ctx, _class| {
                 if self.editor.focus_requested { ctx.send_viewport_cmd(egui::ViewportCommand::Focus); self.editor.focus_requested = false; }
                 crate::editor::editor_ui(self, ctx, &mut actions);
+                seen = Some(ctx.input(|i| (i.viewport().inner_rect, i.viewport().outer_rect)));
                 if ctx.input(|i| i.viewport().close_requested()) { close = true; }
             });
+            // Remember the window size (and, where the platform reports it, the position).
+            if let Some((Some(inner), outer)) = seen {
+                let (w, h) = (inner.width().round(), inner.height().round());
+                let (x, y) = match outer { Some(o) if !linkshot_capture::is_wayland() => (o.left().round(), o.top().round()), _ => self.settings.editor_window_rect.map(|r| (r.0, r.1)).unwrap_or((0.0, 0.0)) };
+                if w >= 200.0 && h >= 200.0 && self.settings.editor_window_rect != Some((x, y, w, h)) {
+                    self.settings.editor_window_rect = Some((x, y, w, h));
+                    self.mark_settings_dirty();
+                }
+            }
             for a in actions { self.dispatch(ctx, a); }
             if close {
                 self.editor_visible = false;

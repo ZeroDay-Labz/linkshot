@@ -62,6 +62,8 @@ impl VideoQuality {
 pub struct Settings {
     // General
     pub ui_theme: UiTheme,
+    /// Interface scale on top of the monitor's own scale factor (1.0 = native).
+    pub ui_scale: f32,
     /// Bumped when the default theme changes so existing settings files pick up the new default once.
     pub theme_generation: u32,
     pub language: String,
@@ -179,6 +181,7 @@ impl Default for Settings {
             run_at_startup: false,
             default_tool_prompted: false,
             system_print_screen: false,
+            ui_scale: 1.0,
             capture_interface: CaptureInterface::CaptureWindow,
             auto_check_updates: false,
             show_onboarding: true,

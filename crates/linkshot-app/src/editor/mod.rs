@@ -563,8 +563,12 @@ fn handle_shortcuts(app: &mut App, ctx: &egui::Context, actions: &mut Vec<Action
     if ctrl && shift && pressed(egui::Key::N) { if let Some(img) = linkshot_platform::clipboard::get_image() { if let Ok(png) = linkshot_render::encode_png(&img) { let doc = Document::from_png(img.width(), img.height(), png); app.editor.add_document(ctx, doc, &app.paths, &app.settings); } } }
     if ctrl && shift && pressed(egui::Key::T) { flatten_current(app); }
     if ctrl && !shift && pressed(egui::Key::Num0) { app.editor.canvas.zoom = 1.0; app.editor.canvas.fit = false; }
-    if ctrl && (pressed(egui::Key::Plus) || pressed(egui::Key::Equals)) { app.editor.canvas.zoom_step(1); }
-    if ctrl && pressed(egui::Key::Minus) { app.editor.canvas.zoom_step(-1); }
+    if ctrl && !shift && (pressed(egui::Key::Plus) || pressed(egui::Key::Equals)) { app.editor.canvas.zoom_step(1); }
+    if ctrl && !shift && pressed(egui::Key::Minus) { app.editor.canvas.zoom_step(-1); }
+    // Interface scale (all windows): Ctrl+Shift +/-/0.
+    if ctrl && shift && (pressed(egui::Key::Plus) || pressed(egui::Key::Equals)) { let z = app.settings.ui_scale + 0.1; app.set_ui_scale(ctx, z); }
+    if ctrl && shift && pressed(egui::Key::Minus) { let z = app.settings.ui_scale - 0.1; app.set_ui_scale(ctx, z); }
+    if ctrl && shift && pressed(egui::Key::Num0) { app.set_ui_scale(ctx, 1.0); }
     if ctrl && pressed(egui::Key::A) { if let Some(d) = app.editor.current_doc() { app.editor.tools.selection = d.doc.page().capture_objects.iter().map(|o| o.object_id.clone()).collect(); } }
     if ctrl && pressed(egui::Key::D) {
         // Ctrl+D: Deselect when something is selected, otherwise Duplicate the capture (as in the menus).
@@ -773,6 +777,15 @@ fn editor_menu(app: &mut App, ui: &mut egui::Ui, ctx: &egui::Context, actions: &
         let mut shrink = app.settings.shrink_to_fit_new_documents;
         if ui.checkbox(&mut shrink, "Shrink to Fit").changed() { app.settings.shrink_to_fit_new_documents = shrink; app.mark_settings_dirty(); }
         if ui.button("Actual Size\tCtrl+0").clicked() { app.editor.canvas.zoom = 1.0; app.editor.canvas.fit = false; ui.close(); }
+        ui.separator();
+        ui.menu_button(format!("Interface Scale ({}%)", (app.settings.ui_scale * 100.0).round() as i32), |ui| {
+            for pct in [75, 90, 100, 110, 125, 150, 175, 200] {
+                let z = pct as f32 / 100.0;
+                if ui.radio((app.settings.ui_scale * 100.0).round() as i32 == pct, format!("{pct}%")).clicked() { let c = ui.ctx().clone(); app.set_ui_scale(&c, z); ui.close(); }
+            }
+            ui.separator();
+            ui.label(egui::RichText::new("Ctrl+Shift + / −, Ctrl+Shift+0 resets. Applies to every LinkShot window, on top of the monitor's own scaling.").small());
+        });
         ui.separator();
         let dark = app.settings.ui_theme == linkshot_core::settings::UiTheme::Dark;
         if ui.radio(dark, "Dark Theme").clicked() { actions.push(Action::SetTheme(linkshot_core::settings::UiTheme::Dark)); ui.close(); }
@@ -1187,6 +1200,7 @@ fn preferences_window(app: &mut App, ctx: &egui::Context, _actions: &mut Vec<Act
     let mut changed = false;
     let mut theme_changed = false;
     let mut rebind = false;
+    let mut ui_scale_changed = false;
     let mut hotkey_warning: Option<String> = None;
     let pal = app.pal;
     egui::Window::new("LinkShot Editor Preferences").open(&mut open).default_width(520.0).show(ctx, |ui| {
@@ -1195,6 +1209,12 @@ fn preferences_window(app: &mut App, ctx: &egui::Context, _actions: &mut Vec<Act
             ui.label("Editor theme:");
             theme_changed |= ui.selectable_value(&mut s.ui_theme, linkshot_core::settings::UiTheme::Light, "Light").changed();
             theme_changed |= ui.selectable_value(&mut s.ui_theme, linkshot_core::settings::UiTheme::Dark, "Dark").changed();
+        });
+        ui.horizontal(|ui| {
+            ui.label("Interface scale:");
+            let mut pct = (s.ui_scale * 100.0).round();
+            if ui.add(egui::Slider::new(&mut pct, 60.0..=250.0).suffix("%").step_by(5.0)).changed() { s.ui_scale = pct / 100.0; changed = true; ui_scale_changed = true; }
+            if ui.button("Reset").clicked() { s.ui_scale = 1.0; changed = true; ui_scale_changed = true; }
         });
         ui.collapsing("Capture", |ui| {
             changed |= ui.checkbox(&mut s.hide_linkshot_during_capture, "Hide LinkShot during capture and remove LinkShot controls from completed captures").changed();
@@ -1292,4 +1312,5 @@ fn preferences_window(app: &mut App, ctx: &egui::Context, _actions: &mut Vec<Act
     if !open { app.show_prefs = false; }
     match default_tool_action { Some(true) => app.make_default_tool(), Some(false) => app.undo_default_tool(), None => {} }
     if rebind { app.register_hotkeys(); }
+    if ui_scale_changed { app.apply_ui_scale(ctx); }
 }

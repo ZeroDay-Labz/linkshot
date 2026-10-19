@@ -191,7 +191,9 @@ pub fn run_probe(body: &str) -> Result<String> {
     use std::sync::{Arc, Mutex};
     static SEQ: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     let conn = zbus::blocking::Connection::session().context("session bus")?;
-    let name = format!("org.linkshot.Probe{}x{}", std::process::id(), SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+    // A sandboxed (Flatpak) app may only own names under its own app id.
+    let prefix = std::env::var("FLATPAK_ID").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "org.linkshot".to_string());
+    let name = format!("{prefix}.Probe{}x{}", std::process::id(), SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
     let result: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     struct Probe { out: Arc<Mutex<Option<String>>> }
     #[zbus::interface(name = "org.linkshot.Probe")]

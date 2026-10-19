@@ -2464,7 +2464,7 @@ dependencies = [
 
 [[package]]
 name = "linkshot"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "ashpd 0.13.13",
@@ -2500,7 +2500,7 @@ dependencies = [
 
 [[package]]
 name = "linkshot-audio"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "linkshot-tools",
@@ -2510,7 +2510,7 @@ dependencies = [
 
 [[package]]
 name = "linkshot-capture"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "ashpd 0.13.13",
@@ -2536,7 +2536,7 @@ dependencies = [
 
 [[package]]
 name = "linkshot-core"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -2555,7 +2555,7 @@ dependencies = [
 
 [[package]]
 name = "linkshot-ocr"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "image",
@@ -2569,7 +2569,7 @@ dependencies = [
 
 [[package]]
 name = "linkshot-platform"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "arboard",
@@ -2584,7 +2584,7 @@ dependencies = [
 
 [[package]]
 name = "linkshot-render"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "cosmic-text",
@@ -2596,7 +2596,7 @@ dependencies = [
 
 [[package]]
 name = "linkshot-tools"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "directories",
@@ -2607,7 +2607,7 @@ dependencies = [
 
 [[package]]
 name = "linkshot-video"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "color_quant",
