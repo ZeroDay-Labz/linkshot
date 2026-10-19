@@ -2,13 +2,13 @@
 Type=Application
 Name=LinkShot
 GenericName=Screen Capture
-Comment=Screen capture, scrolling capture, video recording and an image editor
+Comment=Screenshots, scrolling capture, screen recording with audio and webcam, OCR text grab and an image editor (Snagit alternative)
 Exec=linkshot %U
 TryExec=linkshot
 Icon=linkshot
 Terminal=false
 Categories=Graphics;Utility;
-Keywords=screenshot;screen capture;screen recording;gif;ocr;
+Keywords=screenshot;screen capture;screen shot;snip;snipping;scrolling screenshot;scrolling capture;full page;screen recorder;screen recording;screencast;video;gif;mp4;webcam;microphone;ocr;grab text;text recognition;annotate;annotation;arrow;callout;blur;image editor;snagit;flameshot;spectacle;sharex;greenshot;print screen;
 StartupWMClass=linkshot
 MimeType=application/x-snagx;image/png;image/jpeg;image/gif;image/bmp;image/tiff;image/webp;video/mp4;
 X-KDE-DBUS-Restricted-Interfaces=org.kde.KWin.ScreenShot2

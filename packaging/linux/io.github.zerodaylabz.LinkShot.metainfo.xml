@@ -2,7 +2,7 @@
 <component type="desktop-application">
   <id>io.github.zerodaylabz.LinkShot</id>
   <name>LinkShot</name>
-  <summary>Screen capture, scrolling capture, video recording and an image editor</summary>
+  <summary>Screenshots, scrolling capture, screen recording and an image editor</summary>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MIT OR Apache-2.0</project_license>
   <developer id="io.github.zerodaylabz"><name>ZeroDay-Labz</name></developer>
@@ -10,8 +10,33 @@
     <p>LinkShot captures regions, windows, full screens and whole scrolling pages at native resolution, records
     the screen to animated GIF or MP4, extracts text from images, and edits captures with arrows, callouts,
     shapes, text, highlights, blur, steps, effects and more.</p>
-    <p>Everything needed is included: video export and text recognition work out of the box.</p>
+    <p>Recordings include the microphone and system audio, an optional webcam overlay and Screen Draw
+    annotations; the Editor keeps annotations as editable objects, saves .snagx files and exports PNG, JPG,
+    GIF, WebP, TIFF, BMP, ICO and MP4. Print Screen can start a capture system-wide, and scrolling captures
+    stitch whole pages pixel-exactly even with sticky headers.</p>
+    <p>Everything needed is included: video export and text recognition work out of the box. LinkShot is a
+    free, open-source alternative to Snagit, Flameshot, Spectacle, ShareX and Greenshot for KDE Plasma,
+    GNOME and other Wayland or X11 desktops, and for Windows.</p>
   </description>
+  <keywords>
+    <keyword>screenshot</keyword>
+    <keyword>screen capture</keyword>
+    <keyword>scrolling screenshot</keyword>
+    <keyword>screen recorder</keyword>
+    <keyword>screencast</keyword>
+    <keyword>GIF</keyword>
+    <keyword>MP4</keyword>
+    <keyword>OCR</keyword>
+    <keyword>grab text</keyword>
+    <keyword>annotate</keyword>
+    <keyword>image editor</keyword>
+    <keyword>webcam</keyword>
+    <keyword>Snagit</keyword>
+    <keyword>Flameshot</keyword>
+    <keyword>ShareX</keyword>
+    <keyword>Print Screen</keyword>
+  </keywords>
+  <provides><binary>linkshot</binary><mediatype>application/x-snagx</mediatype></provides>
   <launchable type="desktop-id">io.github.zerodaylabz.LinkShot.desktop</launchable>
   <url type="homepage">https://github.com/ZeroDay-Labz/linkshot</url>
   <url type="bugtracker">https://github.com/ZeroDay-Labz/linkshot/issues</url>

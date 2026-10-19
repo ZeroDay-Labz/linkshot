@@ -3,7 +3,9 @@ name = "linkshot"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "LinkShot — screen capture, scrolling capture, video recording and image editor"
+description = "LinkShot — screenshot, scrolling capture, screen recorder (GIF/MP4 with audio and webcam), OCR and image editor; a Snagit alternative for Linux and Windows"
+keywords = ["screenshot", "screen-recorder", "scrolling-capture", "ocr", "snagit"]
+categories = ["multimedia", "multimedia::images", "multimedia::video", "gui"]
 
 build = "build.rs"
 

@@ -5,8 +5,9 @@
 <h1 align="center">LinkShot</h1>
 
 <p align="center">
-  Screen capture, scrolling capture, video recording, text extraction and an image editor for
-  <b>Linux and Windows</b>. Press Print Screen, pick a region, done.
+  The free, open-source <b>Snagit alternative for Linux and Windows</b>: screenshots, scrolling capture,
+  screen recording with audio and webcam, OCR text grab and a vector image editor in one app.
+  Press Print Screen, pick a region, done.
 </p>
 
 <p align="center">
@@ -34,6 +35,26 @@ Releases are on the [Releases](https://github.com/ZeroDay-Labz/linkshot/releases
 | Fedora / RHEL / openSUSE | `linkshot-<version>.x86_64.rpm` | `sudo dnf install ./linkshot-<version>.x86_64.rpm` |
 | Debian / Ubuntu / Mint | `linkshot_<version>_amd64.deb` | `sudo apt install ./linkshot_<version>_amd64.deb` |
 | Any Linux (Flatpak) | `LinkShot-<version>.flatpak` | `flatpak install --user LinkShot-<version>.flatpak` (needs the Flathub remote for the runtime) |
+
+## Why LinkShot
+
+Linux has good screenshot tools (Spectacle, Flameshot, Ksnip, GNOME Screenshot) and good screen recorders
+(OBS Studio, Kooha, Peek, SimpleScreenRecorder), but nothing that does what Snagit, ShareX or Greenshot do
+on Windows in one place. LinkShot is that tool, on Linux (KDE Plasma, GNOME and other Wayland or X11
+desktops) and on Windows:
+
+* **Screenshot** a region, window, full screen, fixed region or the clipboard, with the cursor, a delay,
+  an interval or a schedule, from a frozen-screen overlay that spans every monitor.
+* **Scrolling screenshot** of whole web pages, documents and long lists, stitched pixel-exactly at native
+  resolution, sticky headers and footers handled.
+* **Screen recorder** to animated GIF or MP4 with microphone, system audio ("what you hear"), a webcam
+  overlay and Screen Draw annotations; pause, resume, in/out points, lossless master kept for re-export.
+* **OCR / grab text** from any part of the screen with the bundled Tesseract.
+* **Image editor** with arrows, callouts, shapes, text, steps, stamps, highlights, blur, magnify, crop,
+  effects, quick styles and undo, where annotations stay editable objects. Captures are saved as `.snagx`
+  (the same container layout Snagit uses, so a Snagit library opens in LinkShot) or exported as PNG, JPG,
+  GIF, WebP, TIFF, BMP and ICO.
+* **Share** to file, clipboard, email, printer or any program, with presets, hotkeys and a tray icon.
 
 ## What it does
 
