@@ -105,6 +105,8 @@ pub struct EditorState {
     pub library_filter: String,
     pub selected_library: Vec<PathBuf>,
     pub new_image_dialog: bool,
+    /// "Edit Value…" on a Step: (object id, text being edited).
+    pub step_edit: Option<(String, String)>,
     pub new_w: String,
     pub new_h: String,
     pub canvas_color_dialog: bool,
@@ -164,6 +166,7 @@ impl EditorState {
             library_filter: String::new(),
             selected_library: vec![],
             new_image_dialog: false,
+            step_edit: None,
             new_w: settings.new_image_width.to_string(),
             new_h: settings.new_image_height.to_string(),
             canvas_color_dialog: false,
@@ -441,7 +444,7 @@ impl EditorState {
 
     pub fn select_tool(&mut self, t: ToolMode) {
         if t == ToolMode::Favorites || t == ToolMode::None { self.tool = t; return; }
-        if matches!(t, ToolMode::Eraser | ToolMode::MagicWand | ToolMode::SimplifiedUI) {
+        if matches!(t, ToolMode::MagicWand | ToolMode::SimplifiedUI) {
             self.set_status(format!("{} is not available yet", t.label()));
             return;
         }
@@ -1194,6 +1197,25 @@ fn library_view(app: &mut App, ui: &mut egui::Ui, rect: Rect, ctx: &egui::Contex
 
 fn dialogs(app: &mut App, ctx: &egui::Context, actions: &mut Vec<Action>) {
     let pal = app.pal;
+    if let Some((id, mut text)) = app.editor.step_edit.take() {
+        let mut keep = true;
+        let mut apply = false;
+        egui::Window::new("Edit Step Value").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(ctx, |ui| {
+            ui.label("Number or letter shown in the step:");
+            let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(120.0));
+            r.request_focus();
+            if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) { apply = true; }
+            ui.horizontal(|ui| {
+                if ui.add(egui::Button::new(egui::RichText::new("OK").color(Color32::WHITE)).fill(pal.product)).clicked() { apply = true; }
+                if ui.button("Cancel").clicked() { keep = false; }
+            });
+        });
+        if apply {
+            let v = text.trim().to_string();
+            if let Some(d) = app.editor.current_doc_mut() { d.edit("Edit Value", |doc| { if let Some(o) = doc.page_mut().capture_objects.iter_mut().find(|o| o.object_id == id) { o.step_value = Some(v); } }); }
+            app.editor.renderer.invalidate();
+        } else if keep { app.editor.step_edit = Some((id, text)); }
+    }
     if app.editor.show_customize_toolbar {
         egui::Window::new("Customize Toolbar").collapsible(false).resizable(false).default_width(570.0).show(ctx, |ui| {
             ui.label("Click a tool to add it to or remove it from the toolbar.");
@@ -1297,7 +1319,7 @@ fn preferences_window(app: &mut App, ctx: &egui::Context, _actions: &mut Vec<Act
             changed |= ui.checkbox(&mut s.hide_linkshot_during_capture, "Hide LinkShot during capture and remove LinkShot controls from completed captures").changed();
             changed |= ui.checkbox(&mut s.show_magnifier, "Show magnifier").changed();
             changed |= ui.checkbox(&mut s.simplified_crosshairs, "Simplified crosshairs").changed();
-            changed |= ui.checkbox(&mut s.show_video_guides, "Show video guides").changed();
+            changed |= ui.checkbox(&mut s.freeze_screen_during_capture, "Freeze the screen during capture (captures menus and tooltips as they were; otherwise the crosshairs are drawn over the live screen)").changed();
             changed |= ui.checkbox(&mut s.run_at_startup, "Run LinkShot when the system starts").changed();
             ui.label(egui::RichText::new("Hotkeys").strong());
             ui.label(egui::RichText::new(format!("Capture: {} (set it under the Capture button)", app.presets.global_hot_key.display())).small());

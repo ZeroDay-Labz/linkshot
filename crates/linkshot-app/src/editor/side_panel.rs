@@ -427,7 +427,12 @@ fn tool_properties(app: &mut App, ui: &mut egui::Ui, tool: ToolMode) {
             ui.label(egui::RichText::new(if horizontal { "Drag across the rows to remove; the parts above and below are joined." } else { "Drag across the columns to remove; the parts left and right are joined." }).small().color(pal.input_secondary));
             if app.editor.tools.region.is_some() { if crate::widgets::flat_button(ui, &pal, "Cut Out", true).clicked() { super::tools::cut_out_apply(app); } }
         }
-        ToolMode::Eraser | ToolMode::MagicWand | ToolMode::SimplifiedUI => {
+        ToolMode::Eraser => {
+            changed |= slider_row(ui, "Width", &mut q.stroke_width, 1.0..=200.0, " px");
+            changed |= slider_row(ui, "Opacity", &mut q.opacity, 0.0..=100.0, "%");
+            ui.label(egui::RichText::new("Drag over the image to erase to the canvas colour (transparent canvases erase to transparency). Annotations are not affected.").small().color(pal.input_secondary));
+        }
+        ToolMode::MagicWand | ToolMode::SimplifiedUI => {
             ui.label(egui::RichText::new(format!("{} is planned for a later phase.", tool.label())).color(pal.input_secondary));
         }
         _ => {}

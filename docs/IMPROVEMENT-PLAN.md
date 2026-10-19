@@ -36,6 +36,8 @@ A prioritised list from a full read-through of the code on 2026-10-18, followed 
    so the 40 ms scrolling loop and the 30 fps recorder hammer the portal. Add a ScreenCast/PipeWire
    frame source (the `screencast` feature is already enabled but unused) or disable those modes
    there with a clear message. The recording toolbar is only kept out of the region on KDE.
+   **done** (0.5.0: `linkshot_capture::screencast`, per-monitor PipeWire streams kept open and paused,
+   one prompt with a restore token; also the Flatpak's capture path on KDE). Open: the toolbar placement.
 9. **Desktop file** — the self-written `~/.local/share/applications/linkshot.desktop` used
    `Icon=camera-photo` and could shadow the packaged one. It now carries the capture action and
    the packaged icon name when installed. **partly done**
@@ -154,3 +156,14 @@ Still open:
   Ctrl+wheel zoom not anchored under the cursor; torn edge reads as static; Create ▾ items are
   placeholders; share errors swallowed; dead `tag_popup` / `zoom_popup` state; Favorites delete only
   searches the current theme; Shift while drawing an arrow constrains to H/V only, not 45°.
+
+## 0.5.0 notes (2026-10-20)
+
+- Capture overlay is live (transparent) by default; frozen mode remains a preference and the automatic
+  fallback on X11 without a compositor. Verified headlessly (selftest) and on KDE Wayland; Windows via
+  the cross-build only.
+- GPU: egui draws the UI, the live overlay and the drag previews on the GPU already; the document
+  rasteriser (tiny-skia) stays on the CPU for exact export. A wgpu rasteriser would be a rewrite with no
+  user-visible gain now that drags no longer rasterise; not planned.
+- Still missing from Snagit: Simplify, Magic Wand, Smart Move, templates / Combine, Edit Points for
+  polygons and beziers, Selection ellipse / lasso, rotation handles, cloud share destinations.

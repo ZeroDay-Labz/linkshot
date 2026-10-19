@@ -17,6 +17,7 @@ mod recording_hud;
 /// exported desktop file and icon), `linkshot` otherwise.
 pub fn app_id() -> String { std::env::var("FLATPAK_ID").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "linkshot".to_string()) }
 mod screen_draw;
+mod live_sampler;
 mod scrolling_hud;
 mod grab_text;
 mod share;
@@ -37,6 +38,31 @@ fn main() -> eframe::Result<()> {
         let files: Vec<std::path::PathBuf> = args[i + 2..].iter().filter(|a| !a.starts_with("--")).map(std::path::PathBuf::from).collect();
         let dark = !args.iter().any(|a| a == "--light");
         if let Err(e) = headless::run_shots(&dir, &files, dark) { eprintln!("shots failed: {e:#}"); std::process::exit(1); }
+        return Ok(());
+    }
+    if args.iter().any(|a| a == "--probe-kwin") {
+        // Sandbox check: can KWin read our scripts and answer? (Flatpak: run with --command=linkshot.)
+        #[cfg(target_os = "linux")]
+        {
+            println!("flatpak: {}  kde: {}  wayland: {}", std::env::var("FLATPAK_ID").unwrap_or_else(|_| "no".into()), linkshot_capture::kwin::is_kde(), linkshot_capture::is_wayland());
+            if linkshot_capture::kwin::is_kde() && std::env::var_os("FLATPAK_ID").is_none() { let _ = linkshot_capture::kwin::ensure_authorization("LinkShot", "linkshot"); }
+            println!("live backend: {:?}", linkshot_capture::live::probe());
+            if linkshot_capture::kwin::is_kde() { match linkshot_capture::kwin::capture_area(0, 0, 2, 2, false) { Ok(i) => println!("KWin CaptureArea 2x2: ok {}x{}", i.width(), i.height()), Err(e) => println!("KWin CaptureArea 2x2 FAILED: {e:#}") } }
+            match linkshot_capture::kwin::window_list() { Ok(w) => { println!("KWin window list: {} windows", w.len()); for x in w.iter().take(8) { println!("  {:>5},{:>5} {:>5}x{:<5} {}", x.x, x.y, x.width, x.height, x.title.chars().take(50).collect::<String>()); } } Err(e) => println!("KWin window list FAILED: {e:#}") }
+            match linkshot_capture::kwin::cursor_pos() { Ok(p) => println!("KWin cursor: {p:?}"), Err(e) => println!("KWin cursor FAILED: {e:#}") }
+        }
+        return Ok(());
+    }
+    if args.iter().any(|a| a == "--probe-screencast") {
+        #[cfg(target_os = "linux")]
+        {
+            println!("ScreenCast portal available: {}", linkshot_capture::screencast::available());
+            let t0 = std::time::Instant::now();
+            match linkshot_capture::screencast::grab_all(false) {
+                Ok((streams, frames)) => { println!("{} streams, {} frames in {} ms", streams.len(), frames.len(), t0.elapsed().as_millis()); for s in &streams { println!("  node {} at {},{} {}x{} -> {:?}", s.node, s.x, s.y, s.width, s.height, frames.get(&s.node).map(|f| (f.width(), f.height()))); } }
+                Err(e) => println!("grab FAILED: {e:#}"),
+            }
+        }
         return Ok(());
     }
     if args.iter().any(|a| a == "--selftest") {

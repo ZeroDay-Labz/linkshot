@@ -20,9 +20,12 @@ pub mod kwin {
 #[cfg(target_os = "linux")]
 pub mod portal;
 #[cfg(target_os = "linux")]
+pub mod screencast;
+#[cfg(target_os = "linux")]
 pub mod wayland_outputs;
 
 pub mod cursor;
+pub mod live;
 pub mod stitch;
 pub mod video;
 pub mod webcam;
@@ -85,6 +88,12 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
+    /// A layout without pixels (the live overlay draws over the real screen).
+    pub fn layout_only(monitors: Vec<MonitorInfo>, windows: Vec<WindowInfo>) -> Self {
+        Self { monitors, images: vec![], windows, taken_at: std::time::Instant::now() }
+    }
+    pub fn is_live(&self) -> bool { self.images.is_empty() }
+
     /// Bounding box of all monitors (the virtual desktop).
     pub fn virtual_rect(&self) -> Rect {
         self.monitors.iter().map(MonitorInfo::rect).reduce(|a, b| a.union(b)).unwrap_or_default()
@@ -170,7 +179,10 @@ pub fn monitors() -> Result<Vec<MonitorInfo>> {
         let outs = wayland_outputs::outputs()?;
         let mut v: Vec<MonitorInfo> = outs.iter().enumerate().map(|(i, o)| MonitorInfo {
             id: i as u32, name: if o.name.is_empty() { o.description.clone() } else { o.name.clone() }, x: o.x, y: o.y,
-            width: o.width as u32, height: o.height as u32, scale_factor: o.scale as f32, is_primary: o.x == 0 && o.y == 0,
+            width: o.width as u32, height: o.height as u32,
+            // wl_output reports an integer scale; the real (possibly fractional) one is physical / logical.
+            scale_factor: if o.phys_w > 0 && o.width > 0 { o.phys_w as f32 / o.width as f32 } else { o.scale.max(1) as f32 },
+            is_primary: o.x == 0 && o.y == 0,
         }).collect();
         if !v.iter().any(|m| m.is_primary) { if let Some(m) = v.first_mut() { m.is_primary = true; } }
         return Ok(v);
@@ -232,6 +244,28 @@ pub fn capture_window(id: u32) -> Result<RgbaImage> {
     Ok(w.capture_image().context("capture window")?)
 }
 
+/// Pointer position in logical virtual-desktop coordinates, when the platform can tell.
+pub fn pointer_position() -> Option<(f64, f64)> {
+    #[cfg(target_os = "linux")]
+    {
+        if is_wayland() { return if kwin::is_kde() { kwin::cursor_pos().ok() } else { None }; }
+        let c = cursor::grab()?;
+        return Some((c.x as f64 + c.image.width() as f64 / 2.0, c.y as f64 + c.image.height() as f64 / 2.0));
+    }
+    #[cfg(windows)]
+    { let c = cursor::grab()?; Some((c.x as f64, c.y as f64)) }
+    #[cfg(not(any(target_os = "linux", windows)))]
+    { None }
+}
+
+/// Monitor geometry and the window list, with no screenshots: what the live capture overlay needs.
+pub fn layout() -> Result<Snapshot> {
+    let monitors = monitors()?;
+    anyhow::ensure!(!monitors.is_empty(), "no monitors found");
+    let windows = windows().unwrap_or_else(|e| { tracing::debug!("window list: {e:#}"); vec![] });
+    Ok(Snapshot::layout_only(monitors, windows))
+}
+
 /// Captures every monitor (used for the frozen overlay background and fullscreen captures).
 pub fn snapshot() -> Result<Snapshot> { snapshot_with_cursor(false) }
 
@@ -258,22 +292,21 @@ pub fn snapshot_with_cursor(include_cursor: bool) -> Result<Snapshot> {
                 return Ok(Snapshot { monitors, images, windows, taken_at: std::time::Instant::now() });
             }
         }
-        let composite = portal::screenshot()?;
-        // The portal returns one image covering the whole (logical) desktop in physical pixels.
-        let virt = monitors.iter().map(MonitorInfo::rect).reduce(|a, b| a.union(b)).unwrap_or_default();
-        let sx = composite.width() as f64 / virt.width().max(1.0);
-        let sy = composite.height() as f64 / virt.height().max(1.0);
-        let mut images = Vec::new();
-        for m in &monitors {
-            let x = ((m.x as f64 - virt.min.x) * sx).round().max(0.0) as u32;
-            let y = ((m.y as f64 - virt.min.y) * sy).round().max(0.0) as u32;
-            let w = ((m.width as f64) * sx).round() as u32;
-            let h = ((m.height as f64) * sy).round() as u32;
-            let w = w.min(composite.width().saturating_sub(x)).max(1);
-            let h = h.min(composite.height().saturating_sub(y)).max(1);
-            images.push(image::imageops::crop_imm(&composite, x, y, w, h).to_image());
+        // ScreenCast portal (per-monitor streams, one prompt) before the Screenshot portal composite;
+        // monitors the user did not share come from the composite.
+        let windows = if kwin::is_kde() { kwin::window_list().unwrap_or_default() } else { vec![] };
+        let mut cast: Vec<Option<RgbaImage>> = vec![None; monitors.len()];
+        if screencast::available() {
+            match screencast::grab_all(include_cursor) {
+                Ok((streams, frames)) => cast = screencast_images(&monitors, &streams, frames),
+                Err(e) => tracing::warn!("ScreenCast portal: {e:#}; falling back to the Screenshot portal"),
+            }
         }
-        return Ok(Snapshot { monitors, images, windows: vec![], taken_at: std::time::Instant::now() });
+        if cast.iter().all(|c| c.is_some()) { return Ok(Snapshot { monitors, images: cast.into_iter().flatten().collect(), windows, taken_at: std::time::Instant::now() }); }
+        let composite = portal::screenshot()?;
+        let split = split_composite(&composite, &monitors);
+        let images = cast.into_iter().zip(split).map(|(c, s)| c.unwrap_or(s)).collect();
+        return Ok(Snapshot { monitors, images, windows, taken_at: std::time::Instant::now() });
     }
     let mons = xcap::Monitor::all().context("enumerate monitors")?;
     anyhow::ensure!(!mons.is_empty(), "no monitors found");
@@ -300,6 +333,38 @@ pub fn snapshot_with_cursor(include_cursor: bool) -> Result<Snapshot> {
     Ok(snap)
 }
 
+/// Matches ScreenCast streams to monitors by position (then by size); `None` for monitors the user
+/// did not share or that delivered no frame.
+#[cfg(target_os = "linux")]
+fn screencast_images(monitors: &[MonitorInfo], streams: &[screencast::StreamInfo], mut frames: std::collections::HashMap<u32, RgbaImage>) -> Vec<Option<RgbaImage>> {
+    monitors.iter().map(|m| {
+        let by_pos = streams.iter().find(|s| s.x == m.x && s.y == m.y);
+        let by_size = || streams.iter().find(|s| s.width == m.width as i32 && s.height == m.height as i32);
+        let single = || if streams.len() == 1 && monitors.len() == 1 { streams.first() } else { None };
+        let st = by_pos.or_else(by_size).or_else(single)?;
+        frames.remove(&st.node)
+    }).collect()
+}
+
+/// Splits one desktop-wide portal screenshot into per-monitor images. The composite covers the
+/// logical layout at one scale when every monitor shares it; with mixed scales the compositor renders
+/// the layout at the largest scale, so the same uniform mapping still places each monitor correctly
+/// (its image is then resampled, which `Snapshot::crop` handles through `scale_at`).
+#[cfg(target_os = "linux")]
+fn split_composite(composite: &RgbaImage, monitors: &[MonitorInfo]) -> Vec<RgbaImage> {
+    let virt = monitors.iter().map(MonitorInfo::rect).reduce(|a, b| a.union(b)).unwrap_or_default();
+    let sx = composite.width() as f64 / virt.width().max(1.0);
+    let sy = composite.height() as f64 / virt.height().max(1.0);
+    tracing::debug!("portal composite {}x{} for a {}x{} logical desktop: scale {sx:.3}/{sy:.3}", composite.width(), composite.height(), virt.width(), virt.height());
+    monitors.iter().map(|m| {
+        let x = ((m.x as f64 - virt.min.x) * sx).round().max(0.0) as u32;
+        let y = ((m.y as f64 - virt.min.y) * sy).round().max(0.0) as u32;
+        let w = (((m.width as f64) * sx).round() as u32).min(composite.width().saturating_sub(x)).max(1);
+        let h = (((m.height as f64) * sy).round() as u32).min(composite.height().saturating_sub(y)).max(1);
+        image::imageops::crop_imm(composite, x, y, w, h).to_image()
+    }).collect()
+}
+
 /// Captures a region of the live screen (logical virtual-desktop coordinates) at native resolution,
 /// without the cursor. Used for scrolling-capture frames, so it must be fast and pixel-exact.
 pub fn capture_region(region: Rect) -> Result<RgbaImage> { capture_region_with_cursor(region, false) }
@@ -318,7 +383,8 @@ pub fn capture_region_with_cursor(region: Rect, include_cursor: bool) -> Result<
             Err(e) => tracing::warn!("KWin CaptureArea failed ({e:#}); falling back to a full snapshot"),
         }
     }
-    let snap = snapshot_intersecting(r)?;
+    let mut snap = snapshot_intersecting(r)?;
+    if include_cursor && !is_wayland() { cursor::composite(&mut snap); }
     snap.crop(r).context("region is off-screen")
 }
 

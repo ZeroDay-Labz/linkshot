@@ -58,6 +58,8 @@ struct PendingCapture {
     bubble_placed: bool,
 }
 
+struct LiveCapture { rx: crossbeam_channel::Receiver<anyhow::Result<image::RgbaImage>>, cursor: Option<linkshot_core::Pt>, settings: CaptureSettings, started: Instant }
+
 const COUNTDOWN_TITLE: &str = "LinkShot Countdown";
 const COUNTDOWN_W: f32 = 170.0;
 const COUNTDOWN_H: f32 = 64.0;
@@ -100,6 +102,8 @@ pub struct App {
     pub prefs_hotkey_editing: Option<String>,
     /// First-run question: make LinkShot the system's screenshot tool (Print Screen).
     pub show_default_prompt: bool,
+    /// Live overlay: the region grab running after the overlay went blank.
+    live_capture: Option<LiveCapture>,
     /// Logical size of the primary monitor (windows are fitted to it).
     pub screen_size: Option<(f32, f32)>,
     /// Was the Capture window visible when the current capture started? Only then does it come back.
@@ -180,6 +184,7 @@ impl App {
             prefs_hotkey_editing: None,
             show_about: false,
             show_default_prompt: false,
+            live_capture: None,
             screen_size: linkshot_capture::monitors().ok().and_then(|ms| ms.iter().find(|m| m.is_primary).or(ms.first()).map(|m| (m.width as f32, m.height as f32))),
             capture_was_visible: false,
             editing_preset: None,
@@ -188,6 +193,8 @@ impl App {
         };
         app.register_hotkeys();
         if let Some(e) = app.hotkeys.error.clone() { tracing::warn!("{e}"); }
+        #[cfg(target_os = "linux")]
+        linkshot_capture::screencast::configure(linkshot_capture::screencast::Tokens { plain: app.settings.screencast_token.clone(), cursor: app.settings.screencast_token_cursor.clone() });
         #[cfg(target_os = "linux")]
         if headless_dark.is_none() && linkshot_capture::kwin::is_kde() && std::env::var_os("FLATPAK_ID").is_none() {
             // The desktop file authorises KWin's ScreenShot2 interface and carries the "capture" action
@@ -511,7 +518,13 @@ impl App {
         }
         self.capture_toggled = false;
         let settings = self.pending.take().unwrap().settings;
-        match linkshot_capture::snapshot_with_cursor(settings.capture_cursor) {
+        // Interactive selection modes draw over the live screen unless the user prefers a frozen one
+        // (or no live back-end exists, e.g. X11 without a compositor).
+        let interactive = !matches!(settings.selection_mode, SelectionMode::SelectionModeFullscreen | SelectionMode::SelectionModeClipboard | SelectionMode::SelectionModeFile)
+            && !(settings.selection_mode == SelectionMode::SelectionModeRegion && settings.selection_settings_region.region_selection_type == RegionSelectionType::RegionSelectionFixed);
+        let backend = if interactive && !self.settings.freeze_screen_during_capture { linkshot_capture::live::probe() } else { None };
+        let grabbed = match backend { Some(_) => linkshot_capture::layout(), None => linkshot_capture::snapshot_with_cursor(settings.capture_cursor) };
+        match grabbed {
             Err(e) => { self.set_status(format!("Capture failed: {e:#}")); self.restore_windows(ctx); }
             Ok(snap) => {
                 let primary = snap.monitors.iter().position(|m| m.is_primary).unwrap_or(0);
@@ -534,9 +547,10 @@ impl App {
                         match snap.crop(r) { Some(img) => self.finish_capture(ctx, img, None, &settings), None => { self.set_status("Fixed region is off-screen."); self.restore_windows(ctx); } }
                     }
                     _ => {
-                        let idx = primary;
+                        // Start on the monitor under the pointer, not the primary one.
+                        let idx = linkshot_capture::pointer_position().and_then(|p| snap.monitor_at(p.0, p.1)).unwrap_or(primary);
                         let mut o = Overlay::new(snap, idx, settings, self.settings.show_magnifier);
-                        o.show_guides = self.settings.show_video_guides;
+                        if let Some(b) = backend { o.sampler = Some(crate::live_sampler::LiveSampler::start(b.supports_sampling() && self.settings.show_magnifier, self.wake())); }
                         self.overlay = Some(o);
                     }
                 }
@@ -790,6 +804,8 @@ impl eframe::App for App {
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         tracing::trace!("update pass {}", ctx.cumulative_pass_nr());
+        #[cfg(target_os = "linux")]
+        if let Some(t) = linkshot_capture::screencast::take_new_tokens() { self.settings.screencast_token = t.plain; self.settings.screencast_token_cursor = t.cursor; self.mark_settings_dirty(); }
         self.poll_events(ctx);
         self.run_pending(ctx);
 
@@ -813,6 +829,7 @@ impl eframe::App for App {
                     .with_title(&title)
                     .with_app_id(crate::app_id())
                     .with_decorations(false)
+                    .with_transparent(true)
                     .with_always_on_top()
                     .with_taskbar(false)
                     .with_resizable(false);
@@ -838,6 +855,34 @@ impl eframe::App for App {
                         std::thread::spawn(move || { if let Err(e) = linkshot_capture::kwin::ensure_fullscreen_placement(&map) { tracing::warn!("KWin placement: {e:#}"); } });
                     }
                 }
+            }
+            // Live mode: once every overlay window is transparent, grab the region from the real screen;
+            // the blank windows stay until the grab is done so nothing of ours is in the picture.
+            if self.live_capture.is_none() {
+                if let Some(o) = self.overlay.as_ref() {
+                    if o.blank_ready() {
+                        if let Some(OverlayResult::Image { region, cursor }) = o.blank_result() {
+                            let (region, cursor, settings) = (*region, *cursor, o.settings.clone());
+                            let (tx, rx) = crossbeam_channel::bounded(1);
+                            let wake = self.wake();
+                            let include_cursor = settings.capture_cursor;
+                            std::thread::spawn(move || { let _ = tx.send(linkshot_capture::capture_region_with_cursor(region, include_cursor)); wake(); });
+                            self.live_capture = Some(LiveCapture { rx, cursor, settings, started: Instant::now() });
+                        }
+                    }
+                }
+            }
+            if let Some(lc) = self.live_capture.as_ref() {
+                let done = match lc.rx.try_recv() { Ok(r) => Some(r), Err(_) if lc.started.elapsed() > Duration::from_secs(6) => Some(Err(anyhow::anyhow!("the screen capture did not finish"))), Err(_) => None };
+                if let Some(res) = done {
+                    let lc = self.live_capture.take().unwrap();
+                    self.overlay = None;
+                    crate::keepalive::wake(ctx);
+                    match res {
+                        Ok(img) => self.finish_capture(ctx, img, lc.cursor, &lc.settings),
+                        Err(e) => { self.set_status(format!("Capture failed: {e:#}")); self.restore_windows(ctx); }
+                    }
+                } else { ctx.request_repaint_after(Duration::from_millis(16)); }
             }
             if let Some(r) = result {
                 let overlay = self.overlay.take().unwrap();

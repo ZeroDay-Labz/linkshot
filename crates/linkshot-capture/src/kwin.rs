@@ -138,25 +138,71 @@ pub fn ensure_authorization(app_name: &str, desktop_id: &str) -> Result<bool> {
 /// A script loaded into KWin (`org.kde.kwin.Scripting`). Scripts run inside the compositor, so
 /// they can do what Wayland clients cannot: move windows between outputs, position them, and
 /// activate them regardless of focus-stealing prevention.
-struct LoadedScript { conn: zbus::blocking::Connection, path: std::path::PathBuf, id: i32 }
+struct LoadedScript { conn: zbus::blocking::Connection, path: std::path::PathBuf, host_path: String, id: i32 }
+
+/// True inside a Flatpak sandbox.
+fn in_flatpak() -> bool { std::path::Path::new("/.flatpak-info").exists() }
+
+/// Resolves `root` + (`path` − longest matching mount point) from a `/proc/self/mountinfo` listing:
+/// the path the host sees for a file inside a bind-mounted directory of this sandbox.
+fn translate_with_mountinfo(mountinfo: &str, path: &std::path::Path) -> Option<std::path::PathBuf> {
+    let mut best: Option<(std::path::PathBuf, std::path::PathBuf)> = None;
+    for line in mountinfo.lines() {
+        let f: Vec<&str> = line.split_whitespace().collect();
+        if f.len() < 5 { continue; }
+        let unescape = |s: &str| s.replace("\\040", " ");
+        let (root, mount) = (std::path::PathBuf::from(unescape(f[3])), std::path::PathBuf::from(unescape(f[4])));
+        if path.starts_with(&mount) && best.as_ref().map(|(_, m)| mount.as_os_str().len() > m.as_os_str().len()).unwrap_or(true) { best = Some((root, mount)); }
+    }
+    let (root, mount) = best?;
+    // A bind mount's root is relative to its source filesystem; the runtime dir is a tmpfs mounted at
+    // /run/user/<uid> on the host, so the host path is that mount plus the root.
+    let rel = path.strip_prefix(&mount).ok()?;
+    if root == std::path::Path::new("/") { return Some(path.to_path_buf()); }
+    let host_base = if mount.starts_with("/run/user") { std::path::PathBuf::from(format!("/run/user/{}", uid())) } else { std::path::PathBuf::from("/") };
+    Some(host_base.join(root.strip_prefix("/").unwrap_or(&root)).join(rel))
+}
+
+fn uid() -> u32 {
+    unsafe extern "C" { fn getuid() -> u32; }
+    // SAFETY: getuid has no preconditions.
+    unsafe { getuid() }
+}
+
+/// The path KWin (on the host) must use for a file this process wrote. Outside Flatpak it is the
+/// same path; inside, the sandbox's runtime dir lives under `/run/user/<uid>/.flatpak/<app>/xdg-run`.
+pub fn host_visible_path(path: &std::path::Path) -> std::path::PathBuf {
+    if !in_flatpak() { return path.to_path_buf(); }
+    if let Ok(mi) = std::fs::read_to_string("/proc/self/mountinfo") {
+        if let Some(p) = translate_with_mountinfo(&mi, path) { return p; }
+    }
+    let app = std::env::var("FLATPAK_ID").unwrap_or_default();
+    let xdg = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| format!("/run/user/{}", uid()));
+    match path.strip_prefix(&xdg) {
+        Ok(rel) => std::path::PathBuf::from(format!("/run/user/{}/.flatpak/{app}/xdg-run", uid())).join(rel),
+        Err(_) => path.to_path_buf(),
+    }
+}
 
 impl LoadedScript {
     fn load(script: &str) -> Result<Self> {
         // KWin executes this file: keep it in the private runtime dir (0700), never a shared /tmp path.
-        let base = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from).filter(|p| p.is_dir()).unwrap_or_else(std::env::temp_dir);
+        // Inside Flatpak only the runtime dir is visible to the host (its /tmp is private).
+        let runtime = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from).filter(|p| p.is_dir());
+        let base = match runtime { Some(p) => p, None if in_flatpak() => anyhow::bail!("no XDG_RUNTIME_DIR in the sandbox; KWin cannot read scripts from here"), None => std::env::temp_dir() };
         let dir = base.join(format!("linkshot-kwin-{}", std::process::id()));
         { use std::os::unix::fs::DirBuilderExt; std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir)?; }
         static SEQ: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         let path = dir.join(format!("script-{}.js", SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
         std::fs::write(&path, script)?;
-        let path_s = path.to_string_lossy().into_owned();
+        let path_s = host_visible_path(&path).to_string_lossy().into_owned();
         let conn = zbus::blocking::Connection::session().context("session bus")?;
         let scripting = zbus::blocking::Proxy::new(&conn, "org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting").context("KWin scripting proxy")?;
         let id: i32 = scripting.call_method("loadScript", &(path_s.as_str(),)).context("loadScript")?.body().deserialize().context("loadScript reply")?;
         tracing::debug!("KWin script {path_s} loaded as id {id}");
         if std::env::var_os("LINKSHOT_KWIN_DEBUG").is_some() { eprintln!("KWin script {path_s} loaded as id {id}"); }
         if id < 0 { let _ = std::fs::remove_file(&path); anyhow::bail!("KWin refused the script"); }
-        Ok(Self { conn, path, id })
+        Ok(Self { conn, path, host_path: path_s, id })
     }
 
     /// Queues the script for execution inside KWin (it runs asynchronously).
@@ -169,7 +215,7 @@ impl LoadedScript {
     /// wait (for a report, or a moment) first.
     fn unload(self) {
         if let Ok(scripting) = zbus::blocking::Proxy::new(&self.conn, "org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting") {
-            let _ = scripting.call_method("unloadScript", &(self.path.to_string_lossy().as_ref(),));
+            let _ = scripting.call_method("unloadScript", &(self.host_path.as_str(),));
         }
         if std::env::var_os("LINKSHOT_KWIN_DEBUG").is_none() { let _ = std::fs::remove_file(&self.path); }
     }
@@ -539,4 +585,23 @@ REPORT(out.join("\n"));
         });
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod path_tests {
+    use super::translate_with_mountinfo;
+    use std::path::Path;
+
+    #[test]
+    fn flatpak_runtime_dir_maps_to_host() {
+        let mi = "100 90 0:30 / / rw - overlay overlay rw\n\
+                  200 100 0:46 /.flatpak/io.github.zerodaylabz.LinkShot/xdg-run /run/user/1000 rw,nosuid,nodev - tmpfs tmpfs rw\n\
+                  201 200 0:46 /pipewire-0 /run/user/1000/pipewire-0 rw - tmpfs tmpfs rw\n";
+        let p = Path::new("/run/user/1000/linkshot-kwin-2/script-4.js");
+        let host = translate_with_mountinfo(mi, p).unwrap();
+        assert!(host.ends_with(".flatpak/io.github.zerodaylabz.LinkShot/xdg-run/linkshot-kwin-2/script-4.js"), "{}", host.display());
+        assert!(host.starts_with("/run/user/"));
+        // Plain mounts (root "/") map to themselves.
+        assert_eq!(translate_with_mountinfo(mi, Path::new("/tmp/x.js")).unwrap(), Path::new("/tmp/x.js"));
+    }
 }

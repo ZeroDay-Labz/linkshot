@@ -29,7 +29,13 @@ enum Phase {
     Selecting { drag_start: Option<(Pt, usize)> },
     /// A region is selected (logical); the HUD is visible (All-in-One) or we auto-complete (Image/Video).
     Selected { rect: LRect },
+    /// Live mode, selection made: every window is fully transparent and click-through while the
+    /// region is grabbed from the real screen underneath (see `blank_ready`).
+    Blank,
 }
+
+/// State of the transparent wait before a live capture.
+struct Blank { result: OverlayResult, since: std::time::Instant, painted: Vec<u32>, passthrough_sent: Vec<bool> }
 
 pub struct Overlay {
     pub snapshot: Snapshot,
@@ -37,9 +43,12 @@ pub struct Overlay {
     textures: Vec<Option<egui::TextureHandle>>,
     phase: Phase,
     pub show_magnifier: bool,
-    /// Video-size guides (1080p/720p/640×480/320×240) while dragging; G toggles.
-    pub show_guides: bool,
     pub result: Option<OverlayResult>,
+    blank: Option<Blank>,
+    /// Live mode only: feeds the loupe and refreshes the window list.
+    pub sampler: Option<crate::live_sampler::LiveSampler>,
+    loupe: Option<(Pt, egui::TextureHandle, image::RgbaImage)>,
+    focus_sent: bool,
     hover_window: Option<LRect>,
     hud_drag: Vec2,
     /// Handle being dragged (index as in `draw_handles`) and the rectangle when the drag began.
@@ -61,7 +70,30 @@ pub struct Overlay {
 impl Overlay {
     pub fn new(snapshot: Snapshot, monitor_idx: usize, settings: CaptureSettings, show_magnifier: bool) -> Self {
         let n = snapshot.monitors.len();
-        Self { snapshot, settings, textures: (0..n).map(|_| None).collect(), phase: Phase::Selecting { drag_start: None }, show_magnifier, show_guides: false, result: None, hover_window: None, hud_drag: Vec2::ZERO, resize: None, width_text: String::new(), height_text: String::new(), frames: 0, placement_started: false, active_monitor: monitor_idx, single_monitor: None, single_resolved: false, drag_point: std::cell::Cell::new(Pt::new(0.0, 0.0)) }
+        Self { snapshot, settings, textures: (0..n).map(|_| None).collect(), phase: Phase::Selecting { drag_start: None }, show_magnifier, result: None, blank: None, sampler: None, loupe: None, focus_sent: false, hover_window: None, hud_drag: Vec2::ZERO, resize: None, width_text: String::new(), height_text: String::new(), frames: 0, placement_started: false, active_monitor: monitor_idx, single_monitor: None, single_resolved: false, drag_point: std::cell::Cell::new(Pt::new(0.0, 0.0)) }
+    }
+
+    /// Live mode: no frozen images, the crosshairs are drawn over the real screen.
+    pub fn live(&self) -> bool { self.snapshot.is_live() }
+
+    /// Live mode: the selection is made and every overlay window has been transparent and
+    /// click-through long enough for the compositor to show the real screen (two passes, 60 ms).
+    pub fn blank_ready(&self) -> bool {
+        let Some(b) = &self.blank else { return false };
+        let min_ms: u64 = std::env::var("LINKSHOT_BLANK_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(60);
+        b.painted.iter().all(|n| *n >= 2) && b.since.elapsed() >= std::time::Duration::from_millis(min_ms)
+    }
+
+    /// The pending live result (the overlay stays blank until the app has captured the region).
+    pub fn blank_result(&self) -> Option<&OverlayResult> { self.blank.as_ref().map(|b| &b.result) }
+
+    /// Finishes a result: in Live mode an image capture first goes blank, everything else completes now.
+    fn finish(&mut self, r: OverlayResult) {
+        let n = self.snapshot.monitors.len();
+        match (&r, self.live()) {
+            (OverlayResult::Image { .. }, true) => { self.phase = Phase::Blank; self.blank = Some(Blank { result: r, since: std::time::Instant::now(), painted: vec![0; n], passthrough_sent: vec![false; n] }); }
+            _ => self.result = Some(r),
+        }
     }
 
     /// Logical rect of the monitor that best contains `r` (for placing HUDs next to it).
@@ -111,7 +143,25 @@ impl Overlay {
     pub fn ui(&mut self, ctx: &egui::Context, pal: &Palette, m: usize) {
         self.frames += 1;
         let m = if self.single_monitor.is_some() { self.resolve_single(ctx) } else { m.min(self.snapshot.monitors.len().saturating_sub(1)) };
-        if self.textures[m].is_none() {
+        // Keys only reach the focused window: focus the one under the pointer once.
+        if !self.focus_sent && m == self.active_monitor { self.focus_sent = true; ctx.send_viewport_cmd(egui::ViewportCommand::Focus); }
+        if let (Phase::Blank, Some(b)) = (self.phase, self.blank.as_mut()) {
+            if !b.passthrough_sent[m] { b.passthrough_sent[m] = true; ctx.send_viewport_cmd(egui::ViewportCommand::MousePassthrough(true)); }
+            b.painted[m] += 1;
+            egui::CentralPanel::default().frame(egui::Frame::NONE.fill(Color32::TRANSPARENT)).show(ctx, |_ui| {});
+            ctx.request_repaint_after(std::time::Duration::from_millis(16));
+            return;
+        }
+        if self.live() {
+            if let Some(s) = &self.sampler {
+                if let Some(w) = s.windows() { self.snapshot.windows = w; }
+                if let Some((at, img)) = s.latest() {
+                    let ci = egui::ColorImage::from_rgba_unmultiplied([img.width() as usize, img.height() as usize], img.as_raw());
+                    let topts = egui::TextureOptions { magnification: egui::TextureFilter::Nearest, minification: egui::TextureFilter::Linear, wrap_mode: egui::TextureWrapMode::ClampToEdge, mipmap_mode: None };
+                    match self.loupe.as_mut() { Some((p, t, i)) => { *p = at; t.set(ci, topts); *i = img; } None => self.loupe = Some((at, ctx.load_texture("overlay-loupe", ci, topts), img)) }
+                }
+            }
+        } else if self.textures[m].is_none() {
             let img = &self.snapshot.images[m];
             let ci = egui::ColorImage::from_rgba_unmultiplied([img.width() as usize, img.height() as usize], img.as_raw());
             // Linear when the frozen screen is drawn 1:1 or minified, nearest when the magnifier blows it up.
@@ -120,11 +170,15 @@ impl Overlay {
         }
         let orange = pal.selection_orange;
         let virt = self.snapshot.virtual_rect();
-        egui::CentralPanel::default().frame(egui::Frame::NONE).show(ctx, |ui| {
+        let live = self.live();
+        egui::CentralPanel::default().frame(egui::Frame::NONE.fill(Color32::TRANSPARENT)).show(ctx, |ui| {
             let view = ui.max_rect();
             let painter = ui.painter_at(view);
             if let Some(t) = &self.textures[m] {
                 painter.image(t.id(), view, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+            } else if live {
+                // A fully transparent window may be treated as empty by some compositors: 1/255 black.
+                painter.rect_filled(view, 0.0, Color32::from_black_alpha(1));
             }
             let resp = ui.interact(view, ui.id().with(("overlay", m)), Sense::click_and_drag());
             let pointer_here = ctx.input(|i| i.pointer.latest_pos());
@@ -132,12 +186,12 @@ impl Overlay {
             if has_pointer { self.active_monitor = m; }
             let pointer = pointer_here.unwrap_or(view.center());
             let lptr = self.to_logical(m, view, pointer);
+            if has_pointer { if let Some(s) = &self.sampler { s.set_pointer(lptr); } }
             let mods = ctx.input(|i| i.modifiers);
             let esc = ctx.input(|i| i.key_pressed(egui::Key::Escape));
             let enter = ctx.input(|i| i.key_pressed(egui::Key::Enter));
             if esc { self.result = Some(OverlayResult::Cancel); return; }
             if ctx.input(|i| i.key_pressed(egui::Key::M)) { self.show_magnifier = !self.show_magnifier; }
-            if ctx.input(|i| i.key_pressed(egui::Key::G)) { self.show_guides = !self.show_guides; }
 
             // Window under the cursor (not while dragging).
             if has_pointer && matches!(self.phase, Phase::Selecting { drag_start: None }) {
@@ -146,6 +200,7 @@ impl Overlay {
 
             let phase = self.phase;
             match phase {
+                Phase::Blank => {}
                 Phase::Selecting { drag_start } => {
                     let mut drag_start = drag_start;
                     if resp.drag_started() { drag_start = Some((ctx.input(|i| i.pointer.press_origin()).map(|p| self.to_logical(m, view, p)).unwrap_or(lptr), m)); }
@@ -167,19 +222,6 @@ impl Overlay {
                         self.set_last_drag_point(cur);
                         let vr = self.rect_to_view(m, view, r);
                         dim_outside(&painter, view, vr);
-                        if self.show_guides && self.settings.capture_mode != CaptureMode::CaptureModeImage {
-                            let sx = if cur.x >= start.x { 1.0 } else { -1.0 };
-                            let sy = if cur.y >= start.y { 1.0 } else { -1.0 };
-                            for (gw, gh, name) in [(1920.0, 1080.0, "1080p"), (1280.0, 720.0, "720p"), (640.0, 480.0, "640×480"), (320.0, 240.0, "320×240")] {
-                                let g = self.rect_to_view(m, view, LRect::from_points(start, Pt::new(start.x + gw * sx, start.y + gh * sy)));
-                                let c = Color32::from_rgba_unmultiplied(0x4F, 0xC3, 0xF7, 200);
-                                for (a, b) in [(g.left_top(), g.right_top()), (g.right_top(), g.right_bottom()), (g.right_bottom(), g.left_bottom()), (g.left_bottom(), g.left_top())] {
-                                    painter.add(egui::Shape::dashed_line(&[a, b], Stroke::new(1.0_f32, c), 6.0, 4.0));
-                                }
-                                let corner = Pos2::new(if sx > 0.0 { g.right() - 4.0 } else { g.left() + 4.0 }, if sy > 0.0 { g.bottom() - 4.0 } else { g.top() + 4.0 });
-                                painter.text(corner, if sx > 0.0 { if sy > 0.0 { Align2::RIGHT_BOTTOM } else { Align2::RIGHT_TOP } } else if sy > 0.0 { Align2::LEFT_BOTTOM } else { Align2::LEFT_TOP }, name, FontId::proportional(11.0), c);
-                            }
-                        }
                         painter.rect_stroke(vr, 0.0, Stroke::new(1.5_f32, orange), egui::StrokeKind::Outside);
                         draw_handles(&painter, vr.intersect(view), orange);
                         let r_round = r.round_out();
@@ -207,10 +249,13 @@ impl Overlay {
                             painter.rect_stroke(vw, 0.0, Stroke::new(3.0_f32, orange), egui::StrokeKind::Inside);
                             painter.rect_filled(vw, 0.0, Color32::from_rgba_unmultiplied(0xFB, 0xB9, 0x01, 18));
                         }
-                        // crosshair
+                        // crosshair (with a hole where the live loupe samples the real screen)
                         if !crate::app::is_simplified_crosshair() {
-                            painter.line_segment([Pos2::new(view.left(), pointer.y), Pos2::new(view.right(), pointer.y)], Stroke::new(1.0_f32, orange));
-                            painter.line_segment([Pos2::new(pointer.x, view.top()), Pos2::new(pointer.x, view.bottom())], Stroke::new(1.0_f32, orange));
+                            let hole = if live && self.show_magnifier { (crate::live_sampler::SAMPLE as f32 / 2.0 + 2.0) * view.width() / self.mrect(m).width() as f32 } else { 0.0 };
+                            painter.line_segment([Pos2::new(view.left(), pointer.y), Pos2::new(pointer.x - hole, pointer.y)], Stroke::new(1.0_f32, orange));
+                            painter.line_segment([Pos2::new(pointer.x + hole, pointer.y), Pos2::new(view.right(), pointer.y)], Stroke::new(1.0_f32, orange));
+                            painter.line_segment([Pos2::new(pointer.x, view.top()), Pos2::new(pointer.x, pointer.y - hole)], Stroke::new(1.0_f32, orange));
+                            painter.line_segment([Pos2::new(pointer.x, pointer.y + hole), Pos2::new(pointer.x, view.bottom())], Stroke::new(1.0_f32, orange));
                         } else {
                             painter.line_segment([pointer - Vec2::new(14.0, 0.0), pointer + Vec2::new(14.0, 0.0)], Stroke::new(1.0_f32, orange));
                             painter.line_segment([pointer - Vec2::new(0.0, 14.0), pointer + Vec2::new(0.0, 14.0)], Stroke::new(1.0_f32, orange));
@@ -220,16 +265,10 @@ impl Overlay {
                         // click (no drag) on a window = capture that window; Enter = capture hover window or this monitor
                         if resp.clicked() || enter {
                             if let Some(w) = self.hover_window { let r = w.round_out(); self.set_dims(r); self.phase = Phase::Selected { rect: r }; self.hud_drag = Vec2::ZERO; }
-                            else if enter { let r = self.mrect(m); self.set_dims(r); self.phase = Phase::Selected { rect: r }; self.hud_drag = Vec2::ZERO; }
+                            else if enter { let r = self.mrect(self.active_monitor); self.set_dims(r); self.phase = Phase::Selected { rect: r }; self.hud_drag = Vec2::ZERO; }
                         }
                         // help hint
-                        let video = self.settings.capture_mode != CaptureMode::CaptureModeImage;
-                        let hint = match (self.snapshot.windows.is_empty(), video) {
-                            (true, false) => "Drag to select a region  •  Enter: whole screen  •  Shift 1:1 / Ctrl 16:9  •  M: magnifier  •  Esc: cancel",
-                            (false, false) => "Drag to select a region  •  Click a window  •  Enter: fullscreen  •  Shift 1:1 / Ctrl 16:9  •  M: magnifier  •  Esc: cancel",
-                            (true, true) => "Drag to select a region  •  Enter: whole screen  •  Shift 1:1 / Ctrl 16:9  •  G: video guides  •  M: magnifier  •  Esc: cancel",
-                            (false, true) => "Drag to select a region  •  Click a window  •  Enter: fullscreen  •  Shift 1:1 / Ctrl 16:9  •  G: guides  •  M: magnifier  •  Esc: cancel",
-                        };
+                        let hint = if self.snapshot.windows.is_empty() { "Drag to select a region  •  Enter: whole screen  •  Shift 1:1 / Ctrl 16:9  •  M: magnifier  •  Esc: cancel" } else { "Drag to select a region  •  Click a window  •  Enter: fullscreen  •  Shift 1:1 / Ctrl 16:9  •  M: magnifier  •  Esc: cancel" };
                         let hint_r = Rect::from_center_size(Pos2::new(view.center().x, view.top() + 30.0), Vec2::new(840.0, 32.0));
                         painter.rect_filled(hint_r.translate(Vec2::new(0.0, 2.0)), 16.0, Color32::from_black_alpha(60));
                         painter.rect_filled(hint_r, 16.0, Color32::from_rgba_unmultiplied(0x17, 0x1B, 0x20, 225));
@@ -285,10 +324,11 @@ impl Overlay {
                     if !wants_hud {
                         // Image tab: capture immediately once the region is chosen.
                         let cursor = if self.settings.capture_cursor { Some(lptr) } else { None };
-                        self.result = Some(match self.settings.selection_mode {
+                        let res = match self.settings.selection_mode {
                             SelectionMode::SelectionModePanoramic | SelectionMode::SelectionModeScrollingWindow => OverlayResult::Scrolling { region: r },
                             _ => OverlayResult::Image { region: r, cursor },
-                        });
+                        };
+                        self.finish(res);
                         return;
                     }
                     // The HUD lives on the monitor holding the selection's centre.
@@ -357,11 +397,12 @@ impl Overlay {
                     if cancel { self.result = Some(OverlayResult::Cancel); return; }
                     if let Some(c) = choice {
                         let cursor = if self.settings.capture_cursor { Some(lptr) } else { None };
-                        self.result = Some(match c {
+                        let res = match c {
                             HudChoice::Image => OverlayResult::Image { region: r, cursor },
                             HudChoice::Video => OverlayResult::Video { region: r },
                             HudChoice::Scrolling => OverlayResult::Scrolling { region: r },
-                        });
+                        };
+                        self.finish(res);
                     }
                 }
             }
@@ -378,6 +419,7 @@ impl Overlay {
     /// the pixel coordinates and the colour under the crosshair. Shown while hovering, dragging and
     /// after selection.
     fn draw_magnifier(&self, painter: &egui::Painter, m: usize, view: Rect, pointer: Pos2, pal: &Palette) {
+        if self.live() { self.draw_live_loupe(painter, m, view, pointer, pal); return; }
         let Some(t) = &self.textures[m] else { return };
         let size = 240.0;
         let zoom = 4.5;
@@ -420,6 +462,45 @@ impl Overlay {
         let px = (((lp.x - mr.min.x) * sx).max(0.0) as u32).min(img.width().saturating_sub(1));
         let py = (((lp.y - mr.min.y) * sy).max(0.0) as u32).min(img.height().saturating_sub(1));
         let p = img.get_pixel(px, py);
+        let text = format!("{}, {}   #{:02X}{:02X}{:02X}", lp.x as i64, lp.y as i64, p[0], p[1], p[2]);
+        let lr = Rect::from_min_max(Pos2::new(r.left(), r.bottom()), Pos2::new(r.right(), r.bottom() + label_h));
+        painter.rect_filled(Rect::from_center_size(Pos2::new(lr.left() + 11.0, lr.center().y), Vec2::splat(12.0)), 3.0, Color32::from_rgb(p[0], p[1], p[2]));
+        painter.text(Pos2::new(lr.left() + 22.0, lr.center().y), Align2::LEFT_CENTER, text, FontId::monospace(12.0), pal.text_bright);
+    }
+}
+
+impl Overlay {
+    /// Live mode loupe: the sampler's latest square around the pointer, blown up to 240 px.
+    fn draw_live_loupe(&self, painter: &egui::Painter, m: usize, view: Rect, pointer: Pos2, pal: &Palette) {
+        let Some((_, t, img)) = &self.loupe else { return };
+        let size = 240.0;
+        let label_h = 22.0;
+        let gap = 24.0;
+        let mut pos = pointer + Vec2::new(gap, gap);
+        if pos.x + size > view.right() { pos.x = pointer.x - gap - size; }
+        if pos.y + size + label_h > view.bottom() { pos.y = pointer.y - gap - size - label_h; }
+        pos.x = pos.x.max(view.left());
+        pos.y = pos.y.max(view.top());
+        let r = Rect::from_min_size(pos, Vec2::splat(size));
+        let frame = Rect::from_min_max(r.min, r.max + Vec2::new(0.0, label_h));
+        painter.rect_filled(frame.expand(3.0).translate(Vec2::new(0.0, 3.0)), 8.0, Color32::from_black_alpha(110));
+        painter.rect_filled(frame.expand(2.0), 7.0, pal.dark_panel);
+        painter.image(t.id(), r, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+        // One grid cell = one sampled pixel.
+        let step = size / img.width().max(1) as f32;
+        if step >= 4.0 {
+            let mut x = r.left();
+            while x <= r.right() + 0.1 { painter.line_segment([Pos2::new(x, r.top()), Pos2::new(x, r.bottom())], Stroke::new(0.5_f32, Color32::from_black_alpha(50))); x += step; }
+            let mut y = r.top();
+            while y <= r.bottom() + 0.1 { painter.line_segment([Pos2::new(r.left(), y), Pos2::new(r.right(), y)], Stroke::new(0.5_f32, Color32::from_black_alpha(50))); y += step; }
+        }
+        let c = r.center();
+        painter.line_segment([Pos2::new(r.left(), c.y), Pos2::new(r.right(), c.y)], Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(0xFB, 0xB9, 0x01, 140)));
+        painter.line_segment([Pos2::new(c.x, r.top()), Pos2::new(c.x, r.bottom())], Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(0xFB, 0xB9, 0x01, 140)));
+        painter.rect_stroke(Rect::from_center_size(c, Vec2::splat(step.max(3.0))), 0.0, Stroke::new(1.5_f32, pal.selection_orange), egui::StrokeKind::Outside);
+        painter.rect_stroke(r, 0.0, Stroke::new(1.0_f32, pal.control_outline), egui::StrokeKind::Outside);
+        let lp = self.to_logical(m, view, pointer);
+        let p = img.get_pixel(img.width() / 2, img.height() / 2);
         let text = format!("{}, {}   #{:02X}{:02X}{:02X}", lp.x as i64, lp.y as i64, p[0], p[1], p[2]);
         let lr = Rect::from_min_max(Pos2::new(r.left(), r.bottom()), Pos2::new(r.right(), r.bottom() + label_h));
         painter.rect_filled(Rect::from_center_size(Pos2::new(lr.left() + 11.0, lr.center().y), Vec2::splat(12.0)), 3.0, Color32::from_rgb(p[0], p[1], p[2]));

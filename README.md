@@ -61,10 +61,11 @@ desktops) and on Windows:
 
 * **Capture window** with All-in-One / Image / Video tabs, presets with hotkeys, time delay, interval and
   scheduled captures, a big red Capture button and a presets drawer.
-* **Region / window / fullscreen / fixed-region / clipboard / file captures** from a frozen-screen overlay
-  with crosshair, window highlight, magnifier (M), aspect locks (Shift / Ctrl / Ctrl+Shift), dimension boxes
-  and the All-in-One HUD (Image / Video / Scrolling). The overlay covers every monitor at once and a region
-  may span screens.
+* **Region / window / fullscreen / fixed-region / clipboard / file captures** from a transparent overlay
+  over the live screen with crosshair, window highlight, magnifier (M), aspect locks (Shift / Ctrl /
+  Ctrl+Shift), dimension boxes and the All-in-One HUD (Image / Video / Scrolling). The overlay covers every
+  monitor at once, a region may span screens, and the region is grabbed from the real screen once chosen.
+  Preferences can freeze the screen instead (for menus and tooltips that close on focus loss).
 * **Scrolling capture**: choose *Scrolling* in the HUD or the *Scrolling Capture* preset (Ctrl+Alt+/), scroll
   the page yourself or press *Auto-scroll*, then *Done*. Frames are grabbed at native resolution and
   stitched pixel-exactly: sticky headers/footers kept once, pinned toolbars kept at their real position,
@@ -83,8 +84,9 @@ desktops) and on Windows:
   lossless master. Existing GIF/MP4 files open in the player too, with their sound track.
 * **Grab Text**: the *Grab Text* selection mode or Edit ▸ Grab Text extracts text with the bundled
   Tesseract into a results window with Copy All.
-* **Editor**: Move, Arrow, Line, Shape, Highlight, Text, Callout, Step, Stamp (a built-in set plus your
-  own PNGs), Pen, Blur, Magnify, Fill, Crop, Cut Out and Selection tools with properties and quick styles (themes
+* **Editor**: Move, Arrow, Line, Shape (rectangles, ellipses, click-to-place polygons), Highlight, Text,
+  Callout (add and remove tails), Step (editable values), Stamp (a built-in set plus your own PNGs), Pen,
+  Eraser, Blur, Magnify, Fill, Crop, Cut Out and Selection tools with properties and quick styles (themes
   with import/export); undo/redo; arrange; flatten; effects (border, shadow, edges, filters, colour
   adjustment, colour replacement, scale, trim); rotate/flip; resize; canvas colour; recent-captures tray
   with pinning; library browser; Copy All; Save / Save As (SNAGX, PNG, JPG, GIF, BMP, TIF, WebP, ICO);
@@ -102,11 +104,12 @@ desktops) and on Windows:
 * **Desktop integration**: global hotkeys (X11 and Windows natively; Wayland through the GlobalShortcuts
   portal), tray icon (left click opens the Capture window, middle click captures), one instance per user
   (launching again raises the running Capture window; `linkshot --capture` starts a capture from a script),
-  prompt-free capture on KDE Plasma Wayland (KWin `ScreenShot2`), the XDG Screenshot portal on other Wayland
-  desktops, `xcap` on X11 and Windows.
+  prompt-free capture on KDE Plasma Wayland (KWin `ScreenShot2`; the rpm and deb), the XDG ScreenCast portal
+  with a remembered share dialog on other Wayland desktops and inside the Flatpak (Flatpak strips KWin's
+  authorisation by design), the Screenshot portal as a last resort, `xcap` on X11 and Windows.
 
-Not yet: Simplify, Magic Wand, Eraser, templates, cloud share destinations (Imgur, Nextcloud), webcam
-and system audio inside the Flatpak on desktops without PipeWire or PulseAudio.
+Not yet: Simplify, Magic Wand, templates, cloud share destinations (Imgur, Nextcloud), webcam and system
+audio inside the Flatpak on desktops without PipeWire or PulseAudio.
 
 ## Screenshots
 

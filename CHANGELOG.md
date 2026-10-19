@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.5.0 — 2026-10-20
+
+- **Live capture overlay.** The selection overlay no longer takes a screenshot of every monitor and
+  shows it back: it is a transparent layer over the real screen on every monitor, with the crosshair,
+  window highlight, size label, handles and HUD drawn on top. The region is grabbed from the live
+  screen once the selection is made (the overlay goes fully transparent for a moment first, so none of
+  it is in the picture). The magnifier samples the live screen around the pointer. The old behaviour
+  is still there as Preferences ▸ Capture ▸ "Freeze the screen during capture" (needed for menus and
+  tooltips that close when they lose focus) and is used automatically where a transparent overlay
+  cannot work (X11 without a compositor). The dashed video-size guides are gone.
+- **Flatpak on multi-monitor KDE fixed.** The sandbox could not hand KWin the paths of its window
+  placement scripts (they live under a different host path), so the per-monitor overlay windows piled
+  up on one screen showing the wrong monitor; the controller window also showed in the taskbar. The
+  paths are translated now. KWin's prompt-free screenshots can never work from a Flatpak (Flatpak
+  strips that permission from exported desktop files by design), so the Flatpak captures through the
+  **ScreenCast portal**: one share dialog, remembered with a restore token, then every monitor is
+  delivered at its native size through PipeWire. The same backend serves GNOME and other Wayland
+  desktops, which previously got one composite screenshot split with a single scale factor.
+- **Editor drawing is instant.** While an object is created, moved or resized it is drawn by the GPU
+  as a preview; the canvas is rasterised once when the mouse button is released.
+- **Eraser** tool (width, opacity; erases to the canvas colour or to transparency, annotations
+  untouched), **polygon shapes** by clicking corners (double-click or Enter closes), **callout tails**:
+  the blue handle adds a tail, dragging a tail back into the callout removes it, and **Edit Value…** on
+  a step's right-click menu.
+- Diagnostics: `linkshot --probe-kwin` and `linkshot --probe-screencast` report what the capture
+  back-ends can do (inside the Flatpak: `flatpak run --command=linkshot io.github.zerodaylabz.LinkShot --probe-kwin`).
+
 ## 0.4.0 — 2026-10-19
 
 - **Cut Out tool** (Editor): drag a band across the rows or columns to remove it; the two parts are

@@ -9,7 +9,8 @@ use linkshot_core::undo::SnapshotCommand;
 use linkshot_core::{Argb, Pt};
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum Handle { N, S, E, W, NE, NW, SE, SW, Start, End, Tail(usize) }
+pub enum Handle { N, S, E, W, NE, NW, SE, SW, Start, End, Tail(usize), /// Blue handle on a callout: dragging it adds a tail.
+    AddTail }
 
 pub enum Drag {
     Create { id: String, start: Pt },
@@ -20,6 +21,8 @@ pub enum Drag {
     /// Dragging one of the eight crop/selection handles (index as drawn in `draw_overlays`).
     RegionResize { handle: usize, start: linkshot_core::Rect },
     Pen { id: String },
+    /// Eraser stroke in document coordinates; applied to the background on release.
+    Erase { points: Vec<Pt> },
 }
 
 pub struct TextEditState {
@@ -67,6 +70,18 @@ pub struct ToolState {
     pub pending_before: Option<Document>,
     /// Stamp picked in the side panel (index into `EditorState::stamps`); clicks place it.
     pub current_stamp: Option<usize>,
+}
+
+impl ToolState {
+    /// Objects being created, moved or resized right now: the rasteriser skips them and
+    /// `draw_overlays` paints a light preview instead, so a drag never re-renders the canvas.
+    pub fn preview_ids(&self) -> Vec<String> {
+        match &self.drag {
+            Some(Drag::Create { id, .. }) | Some(Drag::Resize { id, .. }) | Some(Drag::Pen { id }) => vec![id.clone()],
+            Some(Drag::Move { .. }) => self.selection.clone(),
+            _ => vec![],
+        }
+    }
 }
 
 impl ToolState {
@@ -233,6 +248,7 @@ fn handles_for(o: &CaptureObject, cv: &super::canvas::CanvasState) -> Vec<(Handl
             let r = cv.doc_rect_to_screen(linkshot_core::Rect::from_points(o.p0(), o.p1()));
             let mut v = vec![(Handle::NW, r.left_top()), (Handle::N, r.center_top()), (Handle::NE, r.right_top()), (Handle::W, r.left_center()), (Handle::E, r.right_center()), (Handle::SW, r.left_bottom()), (Handle::S, r.center_bottom()), (Handle::SE, r.right_bottom())];
             for (i, t) in o.callout_tails.iter().enumerate() { v.push((Handle::Tail(i), cv.doc_to_screen(*t))); }
+            if o.tool_mode == "Callout" { v.push((Handle::AddTail, Pos2::new(r.center().x + 18.0, r.bottom() + 14.0))); }
             v
         }
     }
@@ -315,7 +331,7 @@ pub fn handle_input(app: &mut App, ui: &mut egui::Ui, resp: &Response, canvas: R
             app.editor.tools.hover_handle = hover_handle;
             ctx.set_cursor_icon(match &app.editor.tools.hover_handle { Some(Handle::N | Handle::S) => egui::CursorIcon::ResizeVertical, Some(Handle::E | Handle::W) => egui::CursorIcon::ResizeHorizontal, Some(Handle::NE | Handle::SW) => egui::CursorIcon::ResizeNeSw, Some(Handle::NW | Handle::SE) => egui::CursorIcon::ResizeNwSe, Some(_) => egui::CursorIcon::Grab, None if over => egui::CursorIcon::Move, None => egui::CursorIcon::Default });
         }
-    } else if hover.is_some() && matches!(tool, ToolMode::Arrow | ToolMode::Line | ToolMode::Shape | ToolMode::Highlight | ToolMode::Blur | ToolMode::Magnify | ToolMode::Callouts | ToolMode::Text | ToolMode::Crop | ToolMode::Selection | ToolMode::Stamp | ToolMode::CutOut) {
+    } else if hover.is_some() && matches!(tool, ToolMode::Arrow | ToolMode::Line | ToolMode::Shape | ToolMode::Highlight | ToolMode::Blur | ToolMode::Magnify | ToolMode::Callouts | ToolMode::Text | ToolMode::Crop | ToolMode::Selection | ToolMode::Stamp | ToolMode::CutOut | ToolMode::Eraser) {
         ctx.set_cursor_icon(egui::CursorIcon::Crosshair);
     }
 
@@ -324,11 +340,19 @@ pub fn handle_input(app: &mut App, ui: &mut egui::Ui, resp: &Response, canvas: R
         // Anchor at the press position, not where the drag threshold was crossed.
         let dp = ctx.input(|i| i.pointer.press_origin()).map(|p| app.editor.canvas.screen_to_doc(p)).unwrap_or(dp);
         match tool {
-            ToolMode::VectorSelection | ToolMode::Favorites | ToolMode::Fill | ToolMode::Stamp | ToolMode::Eraser | ToolMode::MagicWand | ToolMode::SimplifiedUI | ToolMode::None | ToolMode::DropZone | ToolMode::LastTool => {
+            ToolMode::VectorSelection | ToolMode::Favorites | ToolMode::Fill | ToolMode::Stamp | ToolMode::MagicWand | ToolMode::SimplifiedUI | ToolMode::None | ToolMode::DropZone | ToolMode::LastTool => {
                 if tool == ToolMode::VectorSelection {
                     if let Some(h) = app.editor.tools.hover_handle.clone() {
                         // resize the (first) selected object that owns the handle
-                        if let (Some(id), Some(before)) = (app.editor.tools.selection.first().cloned(), begin(app)) { app.editor.tools.drag = Some(Drag::Resize { id, handle: h, before }); }
+                        if let (Some(id), Some(before)) = (app.editor.tools.selection.first().cloned(), begin(app)) {
+                            let h = if h == Handle::AddTail {
+                                // The blue handle: a new tail starts under the pointer and is dragged like any other.
+                                let mut idx = 0;
+                                if let Some(d) = app.editor.current_doc_mut() { if let Some(o) = d.doc.page_mut().capture_objects.iter_mut().find(|o| o.object_id == id) { o.callout_tails.push(dp); idx = o.callout_tails.len() - 1; } }
+                                Handle::Tail(idx)
+                            } else { h };
+                            app.editor.tools.drag = Some(Drag::Resize { id, handle: h, before });
+                        }
                     } else {
                         let hit = app.editor.current_doc().and_then(|d| hit_test(&d.doc, dp, tol));
                         match hit {
@@ -354,6 +378,7 @@ pub fn handle_input(app: &mut App, ui: &mut egui::Ui, resp: &Response, canvas: R
                     }
                 }
             }
+            ToolMode::Eraser => { app.editor.tools.drag = Some(Drag::Erase { points: vec![dp] }); }
             ToolMode::Crop | ToolMode::Selection | ToolMode::CutOut => {
                 // A press on one of the region's handles resizes it; anywhere else starts a new region.
                 let handle = app.editor.tools.region.and_then(|r| {
@@ -374,6 +399,7 @@ pub fn handle_input(app: &mut App, ui: &mut egui::Ui, resp: &Response, canvas: R
                 }
             }
             ToolMode::Step => {}
+            ToolMode::Shape if app.editor.current_props().tool_shape == linkshot_core::enums::ShapeShape::Polygon => {}
             _ => {
                 let q = app.editor.current_props();
                 if let Some(o) = object_from_style(tool, &q, dp, dp) {
@@ -406,7 +432,6 @@ pub fn handle_input(app: &mut App, ui: &mut egui::Ui, resp: &Response, canvas: R
                         if o.bezier_curve == Some(true) { let mid = start.lerp(b, 0.5); let n = Pt::new(-(b.y - start.y), b.x - start.x) * 0.25; o.control_points = vec![mid + n]; }
                     }
                 }
-                bump(app);
             }
             Drag::Move { start, before } => {
                 let delta = p2 - *start;
@@ -418,7 +443,6 @@ pub fn handle_input(app: &mut App, ui: &mut egui::Ui, resp: &Response, canvas: R
                         if let Some(orig) = originals.iter().find(|x| x.object_id == o.object_id) { let mut c = orig.clone(); c.translate(delta); *o = c; }
                     }
                 }
-                bump(app);
             }
             Drag::Resize { id, handle, before } => {
                 let (id, handle) = (id.clone(), handle.clone());
@@ -441,7 +465,6 @@ pub fn handle_input(app: &mut App, ui: &mut egui::Ui, resp: &Response, canvas: R
                         }
                     }
                 }
-                bump(app);
             }
             Drag::Region { start } => {
                 let mut r = linkshot_core::Rect::from_points(*start, p2).round_out();
@@ -455,6 +478,7 @@ pub fn handle_input(app: &mut App, ui: &mut egui::Ui, resp: &Response, canvas: R
             }
             Drag::RegionResize { handle, start } => { app.editor.tools.region = Some(resize_region(*start, *handle, p2)); }
             Drag::Marquee { .. } => {}
+            Drag::Erase { .. } => { if let Some(Drag::Erase { points }) = app.editor.tools.drag.as_mut() { if points.last().map(|l| l.distance(dp) > 1.0).unwrap_or(true) { points.push(dp); } } }
             Drag::Pen { id } => {
                 let id = id.clone();
                 if let Some(d) = app.editor.current_doc_mut() {
@@ -464,13 +488,14 @@ pub fn handle_input(app: &mut App, ui: &mut egui::Ui, resp: &Response, canvas: R
                         if o.points_array.last().map(|l| l.distance(p) > 1.0).unwrap_or(true) { o.points_array.push(p); }
                     }
                 }
-                bump(app);
             }
         }
     }
 
     // ---------------- drag end ----------------
     if resp.drag_stopped_by(egui::PointerButton::Primary) {
+        // The dragged objects were skipped by the rasteriser: force one full render now.
+        app.editor.tools.render_nonce += 1;
         if let Some(drag) = app.editor.tools.drag.take() {
             match drag {
                 Drag::Create { id, start } => {
@@ -489,7 +514,18 @@ pub fn handle_input(app: &mut App, ui: &mut egui::Ui, resp: &Response, canvas: R
                     }
                 }
                 Drag::Move { before, .. } => commit(app, "Move", before),
+                Drag::Resize { id, handle: Handle::Tail(i), before } => {
+                    // A tail dragged back into the callout body is removed.
+                    if let Some(d) = app.editor.current_doc_mut() {
+                        if let Some(o) = d.doc.page_mut().capture_objects.iter_mut().find(|o| o.object_id == id) {
+                            let body = linkshot_core::Rect::from_points(o.p0(), o.p1());
+                            if o.callout_tails.get(i).map(|t| body.contains(*t)).unwrap_or(false) { o.callout_tails.remove(i); }
+                        }
+                    }
+                    commit(app, "Callout Tail", before);
+                }
                 Drag::Resize { before, .. } => commit(app, "Resize", before),
+                Drag::Erase { points } => erase_apply(app, &points),
                 Drag::Pen { .. } => { if let Some(b) = app.editor.tools.pending_before.take() { commit(app, "Pen", b); } }
                 Drag::Marquee { start } => {
                     let r = linkshot_core::Rect::from_points(start, dp);
@@ -534,6 +570,10 @@ pub fn handle_input(app: &mut App, ui: &mut egui::Ui, resp: &Response, canvas: R
                 }
             }
             ToolMode::Fill => fill_at(app, dp),
+            ToolMode::Shape if app.editor.current_props().tool_shape == linkshot_core::enums::ShapeShape::Polygon => {
+                // Polygon: every click adds a corner; a double-click or Enter closes it.
+                app.editor.tools.poly_points.push(dp);
+            }
             ToolMode::Text | ToolMode::Callouts | ToolMode::Shape | ToolMode::Arrow | ToolMode::Line | ToolMode::Highlight | ToolMode::Blur | ToolMode::Magnify => {
                 // click on an existing object of the same kind selects it (and edits text)
                 if let Some(id) = app.editor.current_doc().and_then(|d| hit_test(&d.doc, dp, tol)) {
@@ -544,6 +584,10 @@ pub fn handle_input(app: &mut App, ui: &mut egui::Ui, resp: &Response, canvas: R
             }
             _ => {}
         }
+    }
+    if tool == ToolMode::Shape && app.editor.tools.poly_points.len() >= 3 && (resp.double_clicked() || ctx.input(|i| i.key_pressed(egui::Key::Enter))) {
+        finish_polygon(app);
+        return;
     }
     if resp.double_clicked() {
         if let Some(id) = app.editor.current_doc().and_then(|d| hit_test(&d.doc, dp, tol)) {
@@ -585,6 +629,120 @@ pub fn commit_text(app: &mut App) {
     commit(app, "Edit Text", before);
 }
 
+/// Closes the polygon being clicked out with the Shape tool into a Shape object.
+pub fn finish_polygon(app: &mut App) {
+    let pts = std::mem::take(&mut app.editor.tools.poly_points);
+    if pts.len() < 3 { return; }
+    let q = app.editor.current_props();
+    let (min, max) = pts.iter().fold((pts[0], pts[0]), |(lo, hi), p| (lo.min(*p), hi.max(*p)));
+    let Some(mut o) = object_from_style(ToolMode::Shape, &q, min, max) else { return };
+    o.tool_shape = Some(linkshot_core::enums::ShapeShape::Polygon);
+    o.points_array = pts;
+    let id = o.object_id.clone();
+    if let Some(before) = begin(app) {
+        if let Some(d) = app.editor.current_doc_mut() { d.doc.page_mut().capture_objects.push(o); }
+        app.editor.tools.selection = vec![id];
+        commit(app, "Polygon", before);
+    }
+}
+
+/// Eraser: paints the stroke onto the background with the canvas colour (transparent canvases erase
+/// to transparency), width and opacity from the tool's properties. Vector objects are untouched.
+pub fn erase_apply(app: &mut App, points: &[Pt]) {
+    if points.is_empty() { return; }
+    let Some(i) = app.editor.current else { return };
+    let q = app.editor.current_props();
+    let radius = (q.stroke_width.max(1.0) / 2.0) as f64;
+    let opacity = (q.opacity / 100.0).clamp(0.0, 1.0);
+    let doc = app.editor.docs[i].doc.clone();
+    let page = doc.page();
+    let Some(png) = doc.background_png(page) else { return };
+    let Ok(mut img) = linkshot_render::decode_png(png) else { return };
+    let (w, h) = img.dimensions();
+    let (ox, oy) = (page.capture_background_location.x, page.capture_background_location.y);
+    let c = page.capture_background_color;
+    let target = [c.r, c.g, c.b, c.a];
+    let mut stamp = |cx: f64, cy: f64| {
+        let r2 = radius * radius;
+        let (x0, x1) = (((cx - radius).floor()).max(0.0) as i64, ((cx + radius).ceil()).min(w as f64 - 1.0) as i64);
+        let (y0, y1) = (((cy - radius).floor()).max(0.0) as i64, ((cy + radius).ceil()).min(h as f64 - 1.0) as i64);
+        for y in y0..=y1 { for x in x0..=x1 {
+            let (dx, dy) = (x as f64 + 0.5 - cx, y as f64 + 0.5 - cy);
+            if dx * dx + dy * dy > r2 { continue; }
+            let p = img.get_pixel_mut(x as u32, y as u32);
+            for k in 0..4 { p.0[k] = (p.0[k] as f64 * (1.0 - opacity) + target[k] as f64 * opacity).round() as u8; }
+        } }
+    };
+    let mut prev: Option<Pt> = None;
+    for p in points {
+        let (px, py) = (p.x - ox, p.y - oy);
+        match prev {
+            Some(q0) => {
+                let (qx, qy) = (q0.x - ox, q0.y - oy);
+                let n = ((px - qx).abs().max((py - qy).abs()) / (radius * 0.5).max(1.0)).ceil().max(1.0) as usize;
+                for k in 1..=n { let t = k as f64 / n as f64; stamp(qx + (px - qx) * t, qy + (py - qy) * t); }
+            }
+            None => stamp(px, py),
+        }
+        prev = Some(*p);
+    }
+    let Ok(out) = linkshot_render::encode_png(&img) else { return };
+    app.editor.docs[i].edit("Eraser", |doc| { let n = doc.page().capture_background_image.clone(); doc.blobs.insert(n, std::sync::Arc::new(out)); });
+    app.editor.renderer.invalidate();
+}
+
+/// A light egui rendering of one object (no shadow, no text layout) for drags.
+fn paint_preview(painter: &egui::Painter, cv: &super::canvas::CanvasState, o: &CaptureObject) {
+    use crate::theme::argb_to_color32;
+    let op = (o.opacity() / 100.0).clamp(0.0, 1.0) as f32;
+    let fg = argb_to_color32(o.fg()).gamma_multiply(op);
+    let bg = argb_to_color32(o.bg()).gamma_multiply(op);
+    let w = (o.stroke_width() as f32 * cv.zoom).max(1.0);
+    let (a, b) = (cv.doc_to_screen(o.p0()), cv.doc_to_screen(o.p1()));
+    let r = Rect::from_two_pos(a, b);
+    match o.tool_mode.as_str() {
+        "Arrow" | "Line" => {
+            painter.line_segment([a, b], Stroke::new(w, fg));
+            if o.tool_mode == "Arrow" {
+                let dir = (b - a).normalized();
+                if dir.x.is_finite() {
+                    let head = (w * 3.0).max(10.0);
+                    let base = b - dir * head;
+                    let n = Vec2::new(-dir.y, dir.x) * head * 0.5;
+                    painter.add(egui::Shape::convex_polygon(vec![b, base + n, base - n], fg, Stroke::NONE));
+                }
+            }
+        }
+        "Pen" => {
+            let pts: Vec<Pos2> = o.points_array.iter().map(|p| cv.doc_to_screen(*p)).collect();
+            if pts.len() >= 2 { painter.add(egui::Shape::line(pts, Stroke::new(w, fg))); } else if let Some(p) = pts.first() { painter.circle_filled(*p, w / 2.0, fg); }
+        }
+        "Highlight" => { painter.rect_filled(r, 0.0, bg); }
+        "Step" => {
+            painter.circle_filled(r.center(), r.width().min(r.height()) / 2.0, bg);
+            if let Some(v) = &o.step_value { painter.text(r.center(), egui::Align2::CENTER_CENTER, v, egui::FontId::proportional((r.height() * 0.5).clamp(8.0, 64.0)), fg); }
+        }
+        "Callout" => {
+            painter.rect_filled(r, 4.0, bg);
+            painter.rect_stroke(r, 4.0, Stroke::new(w.max(1.0), fg), egui::StrokeKind::Outside);
+            if let Some(t) = o.callout_tails.first() {
+                let tip = cv.doc_to_screen(*t);
+                let c = r.center();
+                let n = Vec2::new(-(tip.y - c.y), tip.x - c.x).normalized() * (r.width() * 0.12).max(6.0);
+                painter.add(egui::Shape::convex_polygon(vec![tip, c + n, c - n], bg, Stroke::NONE));
+            }
+        }
+        "Shape" => {
+            match o.tool_shape { Some(linkshot_core::enums::ShapeShape::Ellipse) => { painter.add(egui::Shape::ellipse_filled(r.center(), r.size() / 2.0, bg)); painter.add(egui::Shape::ellipse_stroke(r.center(), r.size() / 2.0, Stroke::new(w, fg))); }
+                _ => { let rad = if o.tool_shape == Some(linkshot_core::enums::ShapeShape::RoundedRectangle) { (r.width().min(r.height()) * 0.15).max(2.0) } else { 0.0 }; painter.rect_filled(r, rad, bg); painter.rect_stroke(r, rad, Stroke::new(w, fg), egui::StrokeKind::Outside); } }
+        }
+        _ => {
+            if o.bg().a > 0 { painter.rect_filled(r, 0.0, bg); }
+            painter.rect_stroke(r, 0.0, Stroke::new(w.max(1.0), if o.bg().a > 0 { fg } else { fg.gamma_multiply(0.8) }), egui::StrokeKind::Outside);
+        }
+    }
+}
+
 /// Draws selection handles, the in-progress region, and the floating text editor.
 pub fn draw_overlays(app: &mut App, ui: &mut egui::Ui, canvas: Rect, ctx: &egui::Context) {
     let pal = app.pal;
@@ -598,11 +756,33 @@ pub fn draw_overlays(app: &mut App, ui: &mut egui::Ui, canvas: Rect, ctx: &egui:
             if !matches!(o.tool_mode.as_str(), "Arrow" | "Line" | "Pen") { painter.rect_stroke(r, 0.0, Stroke::new(1.0_f32, pal.product), egui::StrokeKind::Outside); }
             else { let b = cv.doc_rect_to_screen(o.bounds()); painter.rect_stroke(b.expand(2.0), 0.0, Stroke::new(1.0_f32, pal.product.gamma_multiply(0.5)), egui::StrokeKind::Outside); }
             for (h, pos) in handles_for(o, cv) {
-                let (fill, size) = match h { Handle::Tail(_) => (pal.selection_orange, 9.0), Handle::N if o.bezier_curve == Some(true) && matches!(o.tool_mode.as_str(), "Arrow" | "Line") => (Color32::WHITE, 8.0), _ => (Color32::WHITE, HANDLE) };
+                let (fill, size) = match h { Handle::Tail(_) => (pal.selection_orange, 9.0), Handle::AddTail => (pal.product, 9.0), Handle::N if o.bezier_curve == Some(true) && matches!(o.tool_mode.as_str(), "Arrow" | "Line") => (Color32::WHITE, 8.0), _ => (Color32::WHITE, HANDLE) };
                 painter.rect_filled(Rect::from_center_size(pos, Vec2::splat(size)), 1.0, fill);
                 painter.rect_stroke(Rect::from_center_size(pos, Vec2::splat(size)), 1.0, Stroke::new(1.0_f32, pal.input_secondary), egui::StrokeKind::Outside);
             }
         }
+    }
+    // Objects in a drag: painted here instead of by the rasteriser.
+    for id in app.editor.tools.preview_ids() {
+        if let Some(o) = d.doc.page().capture_objects.iter().find(|o| o.object_id == id) { paint_preview(&painter, cv, o); }
+    }
+    // Polygon under construction (Shape tool, Polygon): corners so far plus a rubber band to the pointer.
+    if app.editor.tool == ToolMode::Shape && !app.editor.tools.poly_points.is_empty() {
+        let mut pts: Vec<Pos2> = app.editor.tools.poly_points.iter().map(|p| cv.doc_to_screen(*p)).collect();
+        if let Some(p) = ctx.input(|i| i.pointer.hover_pos()) { if canvas.contains(p) { pts.push(p); } }
+        painter.add(egui::Shape::line(pts.clone(), Stroke::new(1.5_f32, pal.product)));
+        for p in &pts { painter.circle_filled(*p, 3.5, pal.product); }
+        if let (Some(a), Some(b)) = (pts.first(), pts.last()) { painter.line_segment([*a, *b], Stroke::new(1.0_f32, pal.product.gamma_multiply(0.4))); }
+    }
+    // Eraser stroke in progress: shown in the canvas colour.
+    if let Some(Drag::Erase { points }) = &app.editor.tools.drag {
+        let q = app.editor.current_props();
+        let page = d.doc.page();
+        let c = page.capture_background_color;
+        let color = if c.a == 0 { Color32::from_rgba_unmultiplied(255, 255, 255, 160) } else { crate::theme::argb_to_color32(c).gamma_multiply((q.opacity / 100.0) as f32) };
+        let w = (q.stroke_width as f32 * cv.zoom).max(1.0);
+        let pts: Vec<Pos2> = points.iter().map(|p| cv.doc_to_screen(*p)).collect();
+        if pts.len() >= 2 { painter.add(egui::Shape::line(pts, Stroke::new(w, color))); } else if let Some(p) = pts.first() { painter.circle_filled(*p, w / 2.0, color); }
     }
     // Marquee
     if let Some(Drag::Marquee { start }) = &app.editor.tools.drag {

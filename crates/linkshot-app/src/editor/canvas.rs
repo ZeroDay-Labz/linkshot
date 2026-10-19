@@ -102,10 +102,12 @@ pub fn canvas_ui(app: &mut App, ui: &mut egui::Ui, rect: Rect, ctx: &egui::Conte
     // 20,000 px scrolling capture at 100 % stays as snappy as a small one; the tile is re-rendered
     // when the view leaves it or the document changes.
     let ppp = ctx.pixels_per_point();
-    let skip = app.editor.tools.text_edit.as_ref().map(|t| t.id.clone());
+    // Objects edited live (text being typed, anything being dragged) are drawn by egui, not rasterised.
+    let mut skip: Vec<String> = app.editor.tools.text_edit.as_ref().map(|t| t.id.clone()).into_iter().collect();
+    skip.extend(app.editor.tools.preview_ids());
     let version = app.editor.docs[i].version;
     let render_scale = zoom * ppp;
-    let key = (i, version, (render_scale * 1000.0) as i32, skip.as_ref().map(|s| s.len()).unwrap_or(0) + app.editor.tools.render_nonce);
+    let key = (i, version, (render_scale * 1000.0) as i32, skip.len() * 7919 + app.editor.tools.render_nonce);
     let dev_w = (dw * render_scale).ceil().max(1.0) as i32;
     let dev_h = (dh * render_scale).ceil().max(1.0) as i32;
     let vis = img_rect.intersect(rect);
@@ -128,7 +130,7 @@ pub fn canvas_ui(app: &mut App, ui: &mut egui::Ui, rect: Rect, ctx: &egui::Conte
             let tile = (tx0, ty0, (tx1 - tx0).max(1) as u32, (ty1 - ty0).max(1) as u32);
             let whole = tile.0 == 0 && tile.1 == 0 && tile.2 as i32 == dev_w && tile.3 as i32 == dev_h;
             let doc = &app.editor.docs[i].doc;
-            let opts = RenderOptions { scale: render_scale, checkerboard: true, skip_ids: skip.into_iter().collect(), clip: if whole { None } else { Some([tile.0 as f32, tile.1 as f32, tile.2 as f32, tile.3 as f32]) }, preview: true };
+            let opts = RenderOptions { scale: render_scale, checkerboard: true, skip_ids: skip.clone(), clip: if whole { None } else { Some([tile.0 as f32, tile.1 as f32, tile.2 as f32, tile.3 as f32]) }, preview: true };
             if let Some(pm) = app.editor.renderer.render_page(doc, doc.page(), &opts) {
                 // tiny-skia pixels are premultiplied RGBA, which is what egui stores: no conversion pass.
                 let ci = egui::ColorImage::from_rgba_premultiplied([pm.width() as usize, pm.height() as usize], pm.data());
@@ -175,6 +177,8 @@ fn context_menu(app: &mut App, ui: &mut egui::Ui, ctx: &egui::Context) {
     if item(ui, "Deselect", "Ctrl+D", has_sel || has_region) { app.editor.tools.clear_selection(); }
     if item(ui, "Delete", "Del", has_sel || has_region) { if has_region { super::tools::region_delete(app); } else { super::tools::delete_selection(app); } }
     if has_sel {
+        let step = app.editor.current_doc().and_then(|d| { let sel = &app.editor.tools.selection; d.doc.page().capture_objects.iter().find(|o| sel.contains(&o.object_id) && o.tool_mode == "Step").map(|o| (o.object_id.clone(), o.step_value.clone().unwrap_or_default())) });
+        if let Some((id, value)) = step { if item(ui, "Edit Value…", "", true) { app.editor.step_edit = Some((id, value)); } }
         if item(ui, "Bring to Front", "", true) { super::tools::reorder(app, i32::MAX); }
         if item(ui, "Send to Back", "", true) { super::tools::reorder(app, i32::MIN); }
         if item(ui, "Flatten Selection", "", true) { super::tools::flatten_selection(app); }

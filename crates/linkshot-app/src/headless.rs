@@ -373,6 +373,34 @@ pub fn run_selftest() -> anyhow::Result<()> {
     println!("selftest: overlay region = {:?} ({}x{})", region, region.width(), region.height());
     anyhow::ensure!((region.width() - 400.0).abs() <= 2.0 && (region.height() - 300.0).abs() <= 2.0, "unexpected region size");
     let img = overlay.snapshot.crop(region).context("crop")?;
+    // 1b. Live overlay: same drag over a layout without pixels ends in the blank phase, ready for a
+    // real-screen grab once every window has painted twice and 60 ms passed.
+    {
+        let layout = linkshot_capture::Snapshot::layout_only(synthetic_snapshot().monitors, vec![]);
+        let mut live = crate::overlay::Overlay::new(layout, 0, app.presets.all_in_one.clone(), false);
+        anyhow::ensure!(live.live(), "layout-only snapshot should be live");
+        let lctx = egui::Context::default();
+        let mut lfeed = |events: Vec<Event>, o: &mut crate::overlay::Overlay| {
+            let raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)), max_texture_side: Some(16384), events, ..Default::default() };
+            let _ = lctx.run(raw, |ctx| o.ui(ctx, &pal, 0));
+        };
+        lfeed(vec![], &mut live);
+        lfeed(vec![Event::PointerMoved(Pos2::new(100.0, 100.0))], &mut live);
+        lfeed(vec![Event::PointerButton { pos: Pos2::new(100.0, 100.0), button: PointerButton::Primary, pressed: true, modifiers: Default::default() }], &mut live);
+        for i in 1..=10 { lfeed(vec![Event::PointerMoved(Pos2::new(100.0 + 40.0 * i as f32, 100.0 + 30.0 * i as f32))], &mut live); }
+        lfeed(vec![Event::PointerButton { pos: Pos2::new(500.0, 400.0), button: PointerButton::Primary, pressed: false, modifiers: Default::default() }], &mut live);
+        lfeed(vec![], &mut live);
+        lfeed(vec![Event::Key { key: egui::Key::I, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() }], &mut live);
+        anyhow::ensure!(live.result.is_none(), "live mode must not finish before the blank wait");
+        let region = match live.blank_result() { Some(crate::overlay::OverlayResult::Image { region, .. }) => *region, _ => anyhow::bail!("live overlay should hold an image result") };
+        anyhow::ensure!((region.width() - 400.0).abs() <= 2.0, "live region size");
+        anyhow::ensure!(!live.blank_ready(), "blank must wait for paints");
+        lfeed(vec![], &mut live);
+        lfeed(vec![], &mut live);
+        std::thread::sleep(std::time::Duration::from_millis(70));
+        anyhow::ensure!(live.blank_ready(), "blank should be ready after two paints and 60 ms");
+        println!("selftest: live overlay blanked for region {:?}", region);
+    }
     // Native-resolution cropping: a 2× monitor must yield 2× the logical pixels, copied exactly.
     {
         let mut hi = synthetic_snapshot();
@@ -480,6 +508,19 @@ pub fn run_selftest() -> anyhow::Result<()> {
         let flat = app.editor.renderer.flatten(&d, p).context("flatten after cut out")?;
         anyhow::ensure!(flat.get_pixel(150, 200).0[0] < 100, "the red band should be gone");
         println!("selftest: cut out 100 rows -> {}x{}, annotation moved with the lower part", flat.width(), flat.height());
+        // Eraser: a stroke across the middle erases to the (transparent) canvas colour, objects untouched.
+        app.editor.select_tool(linkshot_core::enums::ToolMode::Eraser);
+        let mut q = app.editor.current_props();
+        q.stroke_width = 30.0;
+        q.opacity = 100.0;
+        app.editor.props.insert(linkshot_core::enums::ToolMode::Eraser, q);
+        crate::editor::tools::erase_apply(&mut app, &[linkshot_core::Pt::new(10.0, 50.0), linkshot_core::Pt::new(290.0, 50.0)]);
+        let d2 = app.editor.current_doc().unwrap().doc.clone();
+        let flat2 = app.editor.renderer.flatten(&d2, d2.page()).context("flatten after erase")?;
+        anyhow::ensure!(flat2.get_pixel(150, 50).0[3] == 0, "erased pixels should be transparent, got {:?}", flat2.get_pixel(150, 50));
+        anyhow::ensure!(flat2.get_pixel(150, 120).0[3] == 255, "pixels off the stroke stay");
+        anyhow::ensure!(d2.page().capture_objects.len() == 1, "eraser must keep annotations");
+        println!("selftest: eraser stroke cleared a 30 px band, annotation kept");
         app.editor.docs.clear();
         app.editor.current = None;
     }

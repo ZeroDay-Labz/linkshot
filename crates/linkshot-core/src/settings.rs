@@ -86,6 +86,10 @@ pub struct Settings {
     pub require_start_button_for_scrolling: bool,
     /// Wayland RemoteDesktop portal token so Automatic Scrolling does not prompt every time.
     pub remote_desktop_token: Option<String>,
+    /// ScreenCast portal restore tokens (without / with the pointer embedded) so screen grabs on
+    /// Wayland desktops without KWin access prompt only once.
+    pub screencast_token: Option<String>,
+    pub screencast_token_cursor: Option<String>,
     /// Grab Text: Tesseract language(s) when the CLI is installed (e.g. "eng", "eng+deu").
     pub ocr_language: String,
     /// Grab Text: always use the bundled models even when Tesseract is installed.
@@ -100,7 +104,9 @@ pub struct Settings {
     pub enable_webcam: bool,
     pub disable_hw_recording: bool,
     pub video_quality: VideoQuality,
-    pub show_video_guides: bool,
+    /// Freeze the screen (one screenshot per monitor) before the selection overlay instead of drawing
+    /// the crosshairs over the live screen and capturing afterwards.
+    pub freeze_screen_during_capture: bool,
     /// Format a finished recording is saved as: "GIF" (default) or "MP4". Save As offers both.
     pub default_video_format: String,
     /// Last used "Create Animated GIF" settings.
@@ -192,6 +198,8 @@ impl Default for Settings {
             simplified_crosshairs: false,
             require_start_button_for_scrolling: false,
             remote_desktop_token: None,
+            screencast_token: None,
+            screencast_token_cursor: None,
             ocr_language: "eng".into(),
             ocr_prefer_builtin: false,
             mic_muted_alert: true,
@@ -204,7 +212,7 @@ impl Default for Settings {
             enable_webcam: true,
             disable_hw_recording: false,
             video_quality: VideoQuality::High,
-            show_video_guides: true,
+            freeze_screen_during_capture: false,
             default_video_format: "GIF".into(),
             gif_export: GifExportSettings::default(),
             mp4_crf: 18,
