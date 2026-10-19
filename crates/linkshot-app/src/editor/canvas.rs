@@ -130,8 +130,8 @@ pub fn canvas_ui(app: &mut App, ui: &mut egui::Ui, rect: Rect, ctx: &egui::Conte
             let doc = &app.editor.docs[i].doc;
             let opts = RenderOptions { scale: render_scale, checkerboard: true, skip_ids: skip.into_iter().collect(), clip: if whole { None } else { Some([tile.0 as f32, tile.1 as f32, tile.2 as f32, tile.3 as f32]) }, preview: true };
             if let Some(pm) = app.editor.renderer.render_page(doc, doc.page(), &opts) {
-                let img = linkshot_render::pixmap_to_image(&pm);
-                let ci = egui::ColorImage::from_rgba_unmultiplied([img.width() as usize, img.height() as usize], img.as_raw());
+                // tiny-skia pixels are premultiplied RGBA, which is what egui stores: no conversion pass.
+                let ci = egui::ColorImage::from_rgba_premultiplied([pm.width() as usize, pm.height() as usize], pm.data());
                 let topts = egui::TextureOptions { magnification: egui::TextureFilter::Nearest, minification: egui::TextureFilter::Linear, wrap_mode: egui::TextureWrapMode::ClampToEdge, mipmap_mode: None };
                 match app.editor.canvas.texture.as_mut() {
                     Some(t) => t.set(ci, topts),

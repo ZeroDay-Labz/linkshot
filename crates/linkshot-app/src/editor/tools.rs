@@ -248,7 +248,8 @@ fn commit(app: &mut App, name: &str, before: Document) {
         }
     }
 }
-fn bump(app: &mut App) { if let Some(d) = app.editor.current_doc_mut() { d.version += 1; } }
+// `changed_at` holds back the tray thumbnail (a full re-render) until a drag or stroke pauses.
+fn bump(app: &mut App) { if let Some(d) = app.editor.current_doc_mut() { d.version += 1; d.changed_at = std::time::Instant::now(); } }
 
 pub fn handle_input(app: &mut App, ui: &mut egui::Ui, resp: &Response, canvas: Rect, ctx: &egui::Context) {
     let Some(_) = app.editor.current else { return };
