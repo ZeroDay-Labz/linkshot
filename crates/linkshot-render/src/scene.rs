@@ -9,6 +9,7 @@ use linkshot_core::enums::*;
 use linkshot_core::geometry::{Pt, Rect};
 use linkshot_core::rtf::RichText;
 use std::collections::HashMap;
+use std::sync::Arc;
 use tiny_skia::{BlendMode, FillRule, LineCap as SkCap, LineJoin, Paint, Pixmap, PixmapPaint, Stroke, StrokeDash, Transform};
 
 #[derive(Clone, Debug)]
@@ -30,14 +31,27 @@ impl Default for RenderOptions {
     fn default() -> Self { Self { scale: 1.0, checkerboard: false, skip_ids: vec![], clip: None, preview: false } }
 }
 
+/// A cached bitmap, and whether every pixel is opaque (checked once, when it is cached).
+struct Bitmap { pm: Pixmap, opaque: bool }
+
+impl Bitmap {
+    fn new(pm: Pixmap) -> Self { let opaque = pm.pixels().iter().all(|p| p.alpha() == 255); Self { pm, opaque } }
+}
+
+impl std::ops::Deref for Bitmap {
+    type Target = Pixmap;
+    fn deref(&self) -> &Pixmap { &self.pm }
+}
+
 pub struct Renderer {
     pub text: TextEngine,
     /// Decoded background bitmaps keyed by blob name.
-    bg_cache: HashMap<String, Pixmap>,
+    /// Shared, not cloned, on every lookup: a frame used to copy the full-size capture just to read it.
+    bg_cache: HashMap<String, Arc<Bitmap>>,
     /// Background pre-downscaled with a Lanczos filter, keyed by (member, w, h): drawing a 1:1 pixmap
     /// is both faster and far sharper than tiny-skia's bilinear sampling at small scales.
-    bg_scaled: HashMap<(String, u32, u32), Pixmap>,
-    img_cache: HashMap<String, Pixmap>,
+    bg_scaled: HashMap<(String, u32, u32), Arc<Bitmap>>,
+    img_cache: HashMap<String, Arc<Pixmap>>,
 }
 
 impl Default for Renderer {
@@ -55,17 +69,17 @@ impl Renderer {
         self.img_cache.clear();
     }
 
-    fn background(&mut self, doc: &Document, page: &Page) -> Option<Pixmap> {
+    fn background(&mut self, doc: &Document, page: &Page) -> Option<Arc<Bitmap>> {
         let key = page.capture_background_image.clone();
         if let Some(p) = self.bg_cache.get(&key) { return Some(p.clone()); }
         let bytes = doc.background_png(page)?;
         let img = crate::decode_png(bytes).ok()?;
-        let pm = pixmap_from_image(&img)?;
+        let pm = Arc::new(Bitmap::new(pixmap_from_image(&img)?));
         self.bg_cache.insert(key, pm.clone());
         Some(pm)
     }
 
-    fn background_scaled(&mut self, doc: &Document, page: &Page, w: u32, h: u32) -> Option<Pixmap> {
+    fn background_scaled(&mut self, doc: &Document, page: &Page, w: u32, h: u32) -> Option<Arc<Bitmap>> {
         let key = (page.capture_background_image.clone(), w, h);
         if let Some(p) = self.bg_scaled.get(&key) { return Some(p.clone()); }
         let bg = self.background(doc, page)?;
@@ -77,19 +91,19 @@ impl Renderer {
         let src = if factor >= 2 { crate::decimate(&src, factor) } else { src };
         let filter = if (w as u64 * h as u64) > 4_000_000 { image::imageops::FilterType::Triangle } else { image::imageops::FilterType::Lanczos3 };
         let small = image::imageops::resize(&src, w.max(1), h.max(1), filter);
-        let pm = Pixmap::from_vec(small.into_raw(), tiny_skia::IntSize::from_wh(w.max(1), h.max(1))?)?;
+        let pm = Arc::new(Bitmap::new(Pixmap::from_vec(small.into_raw(), tiny_skia::IntSize::from_wh(w.max(1), h.max(1))?)?));
         if self.bg_scaled.len() > 6 { self.bg_scaled.clear(); }
         self.bg_scaled.insert(key, pm.clone());
         Some(pm)
     }
 
-    fn image_object(&mut self, obj: &CaptureObject) -> Option<Pixmap> {
+    fn image_object(&mut self, obj: &CaptureObject) -> Option<Arc<Pixmap>> {
         let key = obj.object_id.clone();
         if let Some(p) = self.img_cache.get(&key) { return Some(p.clone()); }
         let b64 = obj.image_data.as_deref()?;
         let bytes = base64_decode(b64)?;
         let img = crate::decode_png(&bytes).ok()?;
-        let pm = pixmap_from_image(&img)?;
+        let pm = Arc::new(pixmap_from_image(&img)?);
         self.img_cache.insert(key, pm.clone());
         Some(pm)
     }
@@ -131,13 +145,11 @@ impl Renderer {
     pub fn draw_background(&mut self, pm: &mut Pixmap, doc: &Document, page: &Page, opts: &RenderOptions) {
         let s = opts.scale;
         let canvas = page.capture_background_color;
-        if opts.checkerboard && canvas.a < 255 {
-            draw_checkerboard(pm, (8.0 * s).max(4.0) as u32);
-        }
-        if canvas.a > 0 {
-            pm.fill_rect(tiny_skia::Rect::from_xywh(0.0, 0.0, pm.width() as f32, pm.height() as f32).unwrap(), &solid(canvas, 1.0), Transform::identity(), None);
-        }
         let off = opts.clip.map(|c| (-c[0], -c[1])).unwrap_or((0.0, 0.0));
+        // Choose the background bitmap and its placement first: an opaque capture that covers the whole
+        // tile hides the checkerboard and canvas colour, and is copied row by row instead of going
+        // through the raster pipeline (this used to be a large fixed cost of every editor frame).
+        let mut layer: Option<(Arc<Bitmap>, Transform, tiny_skia::FilterQuality)> = None;
         if let Some(bg) = self.background(doc, page) {
             let loc = page.capture_background_location;
             // mac files may scale the background (BackgroundSize); Windows draws 1:1.
@@ -150,14 +162,35 @@ impl Renderer {
                 let tw = (bg.width() as f32 * fx).round().max(1.0) as u32;
                 let th = (bg.height() as f32 * fy).round().max(1.0) as u32;
                 if let Some(small) = self.background_scaled(doc, page, tw, th) {
-                    let t = Transform::from_translate(loc.x as f32 * s + off.0, loc.y as f32 * s + off.1);
-                    pm.draw_pixmap(0, 0, small.as_ref(), &PixmapPaint { opacity: 1.0, blend_mode: BlendMode::SourceOver, quality: tiny_skia::FilterQuality::Bilinear }, t, None);
-                    return;
+                    layer = Some((small, Transform::from_translate(loc.x as f32 * s + off.0, loc.y as f32 * s + off.1), tiny_skia::FilterQuality::Bilinear));
                 }
             }
-            let quality = if (fx - fx.round()).abs() < 1e-3 && (fy - fy.round()).abs() < 1e-3 { tiny_skia::FilterQuality::Nearest } else if opts.preview { tiny_skia::FilterQuality::Bilinear } else { tiny_skia::FilterQuality::Bicubic };
-            let t = Transform::from_scale(fx, fy).post_translate(loc.x as f32 * s + off.0, loc.y as f32 * s + off.1);
-            pm.draw_pixmap(0, 0, bg.as_ref(), &PixmapPaint { opacity: 1.0, blend_mode: BlendMode::SourceOver, quality }, t, None);
+            if layer.is_none() {
+                let quality = if (fx - fx.round()).abs() < 1e-3 && (fy - fy.round()).abs() < 1e-3 { tiny_skia::FilterQuality::Nearest } else if opts.preview { tiny_skia::FilterQuality::Bilinear } else { tiny_skia::FilterQuality::Bicubic };
+                layer = Some((bg, Transform::from_scale(fx, fy).post_translate(loc.x as f32 * s + off.0, loc.y as f32 * s + off.1), quality));
+            }
+        }
+        let blit = layer.as_ref().and_then(|(img, t, _)| {
+            let whole = |v: f32| (v - v.round()).abs() < 1e-4;
+            let unscaled = t.sx == 1.0 && t.sy == 1.0 && t.kx == 0.0 && t.ky == 0.0;
+            (unscaled && whole(t.tx) && whole(t.ty) && img.opaque).then(|| (t.tx.round() as i32, t.ty.round() as i32))
+        });
+        let covers = match (&layer, blit) {
+            (Some((img, _, _)), Some((x, y))) => x <= 0 && y <= 0 && x + img.width() as i32 >= pm.width() as i32 && y + img.height() as i32 >= pm.height() as i32,
+            _ => false,
+        };
+        if !covers {
+            if opts.checkerboard && canvas.a < 255 {
+                draw_checkerboard(pm, (8.0 * s).max(4.0) as u32);
+            }
+            if canvas.a > 0 {
+                pm.fill_rect(tiny_skia::Rect::from_xywh(0.0, 0.0, pm.width() as f32, pm.height() as f32).unwrap(), &solid(canvas, 1.0), Transform::identity(), None);
+            }
+        }
+        match (layer, blit) {
+            (Some((img, _, _)), Some((x, y))) => blit_opaque(pm, &img, x, y),
+            (Some((img, t, quality)), None) => pm.draw_pixmap(0, 0, Pixmap::as_ref(&img), &PixmapPaint { opacity: 1.0, blend_mode: BlendMode::SourceOver, quality }, t, None),
+            _ => {}
         }
     }
 
@@ -179,15 +212,24 @@ impl Renderer {
         let bounds = obj.bounds();
         let c = bounds.center();
         let t = if obj.rotation() != 0.0 { Transform::from_rotate_at(obj.rotation() as f32, c.x as f32 * s, c.y as f32 * s).post_concat(off) } else { off };
-        let backdrop = pm.clone();
-        self.paint_object(&mut layer, Some(backdrop), doc, page, obj, s, t);
+        // Only Blur and Magnify read what is underneath them.
+        self.paint_object(&mut layer, pm_clone_opt(pm, obj), doc, page, obj, s, t);
+        // Shadow and compositing work on the painted part of the layer only: blurring and blending the
+        // whole tile for every shadowed object made each frame of a drag cost several full-canvas blurs.
+        let Some(area) = painted_bounds(&layer) else { return };
         if let Some(sh) = shadow {
-            let mut shadow_pm = layer.clone();
-            blur::tint_alpha(&mut shadow_pm, skia_color(sh.color), (sh.opacity / 100.0) as f32);
-            blur::gaussian_blur(&mut shadow_pm, (sh.blur as f32 * s).max(0.0) * 1.2);
-            pm.draw_pixmap((sh.dx as f32 * s).round() as i32, (sh.dy as f32 * s).round() as i32, shadow_pm.as_ref(), &PixmapPaint { opacity, ..Default::default() }, Transform::identity(), None);
+            let sigma = (sh.blur as f32 * s).max(0.0) * 1.2;
+            // Three box passes reach about 3σ; pad past that so the crop does not cut the blur off.
+            let pad = (sigma * 3.5).ceil() as i32 + 2;
+            let (x0, y0) = ((area.x() - pad).max(0), (area.y() - pad).max(0));
+            let x1 = (area.x() + area.width() as i32 + pad).min(layer.width() as i32);
+            let y1 = (area.y() + area.height() as i32 + pad).min(layer.height() as i32);
+            let cut = tiny_skia::IntRect::from_ltrb(x0, y0, x1, y1).and_then(|r| layer.clone_rect(r));
+            if let Some(shadow_pm) = cut.and_then(|c| blur::shadow(&c, skia_color(sh.color), (sh.opacity / 100.0) as f32, sigma)) {
+                blend_over(pm, &shadow_pm, x0 + (sh.dx as f32 * s).round() as i32, y0 + (sh.dy as f32 * s).round() as i32, opacity);
+            }
         }
-        pm.draw_pixmap(0, 0, layer.as_ref(), &PixmapPaint { opacity, ..Default::default() }, Transform::identity(), None);
+        blend_over_rect(pm, &layer, area, opacity);
     }
 
     /// Paints the raw object geometry (no shadow/opacity) with transform `t` (device space).
@@ -319,7 +361,7 @@ impl Renderer {
                 let Some(img) = self.image_object(obj) else { return };
                 let tr = dev_rect(b, s);
                 let t = Transform::from_scale(tr.width() / img.width() as f32, tr.height() / img.height() as f32).post_translate(tr.left(), tr.top()).post_concat(t);
-                pm.draw_pixmap(0, 0, img.as_ref(), &PixmapPaint { quality: tiny_skia::FilterQuality::Bilinear, ..Default::default() }, t, None);
+                pm.draw_pixmap(0, 0, Pixmap::as_ref(&img), &PixmapPaint { quality: tiny_skia::FilterQuality::Bilinear, ..Default::default() }, t, None);
             }
             "Group" => {
                 for child in &obj.objects { self.draw_object_at(pm, doc, page, child, s, t); }
@@ -337,6 +379,71 @@ impl Renderer {
             _ => {}
         }
     }
+}
+
+/// SourceOver of `src` onto `dst` at whole-pixel offset (`x`, `y`), scaled by `opacity`. Same float
+/// arithmetic as the highp pipeline tiny-skia uses for `draw_pixmap`, so results match it exactly,
+/// without the per-pixel pipeline overhead.
+fn blend_over(dst: &mut Pixmap, src: &Pixmap, x: i32, y: i32, opacity: f32) {
+    if let Some(r) = tiny_skia::IntRect::from_xywh(0, 0, src.width(), src.height()) { blend_rows(dst, src, r, x, y, opacity); }
+}
+
+/// [`blend_over`] of the `area` part of `src`, which lies at the same coordinates as `dst`.
+fn blend_over_rect(dst: &mut Pixmap, src: &Pixmap, area: tiny_skia::IntRect, opacity: f32) {
+    blend_rows(dst, src, area, area.x(), area.y(), opacity);
+}
+
+fn blend_rows(dst: &mut Pixmap, src: &Pixmap, area: tiny_skia::IntRect, x: i32, y: i32, opacity: f32) {
+    const F: f32 = 1.0 / 255.0;
+    // load_8888 → scale_1_float → source_over (d·(1−sa)+s, no FMA) → store_8888 (clamp, round half to even).
+    let store = |v: f32| (v.max(0.0).min(1.0) * 255.0).round_ties_even() as u8;
+    let (dw, dh, sw) = (dst.width() as i32, dst.height() as i32, src.width() as i32);
+    let (x0, x1) = (x.max(0), (x + area.width() as i32).min(dw));
+    let (y0, y1) = (y.max(0), (y + area.height() as i32).min(dh));
+    if x0 >= x1 || y0 >= y1 { return; }
+    let (s, d) = (src.data(), dst.data_mut());
+    for yy in y0..y1 {
+        let srow = ((yy - y + area.y()) * sw + (x0 - x + area.x())) as usize * 4;
+        let drow = (yy * dw + x0) as usize * 4;
+        let n = (x1 - x0) as usize * 4;
+        for (sp, dp) in s[srow..srow + n].chunks_exact(4).zip(d[drow..drow + n].chunks_exact_mut(4)) {
+            if sp[3] == 0 { continue; }
+            let sa = sp[3] as f32 * F * opacity;
+            let inv = 1.0 - sa;
+            for k in 0..4 { dp[k] = store(dp[k] as f32 * F * inv + sp[k] as f32 * F * opacity); }
+        }
+    }
+}
+
+/// Copies the opaque `src` onto `dst` with its top-left at (`x`, `y`): SourceOver of an opaque pixel
+/// is the pixel itself, so this matches `draw_pixmap` at a whole-pixel offset.
+fn blit_opaque(dst: &mut Pixmap, src: &Pixmap, x: i32, y: i32) {
+    let (dw, dh, sw, sh) = (dst.width() as i32, dst.height() as i32, src.width() as i32, src.height() as i32);
+    let (x0, x1, y0, y1) = (x.max(0), (x + sw).min(dw), y.max(0), (y + sh).min(dh));
+    if x0 >= x1 || y0 >= y1 { return; }
+    let n = ((x1 - x0) * 4) as usize;
+    let (s, d) = (src.data(), dst.data_mut());
+    for yy in y0..y1 {
+        let so = (((yy - y) * sw + (x0 - x)) * 4) as usize;
+        let dof = ((yy * dw + x0) * 4) as usize;
+        d[dof..dof + n].copy_from_slice(&s[so..so + n]);
+    }
+}
+
+/// The smallest rectangle holding every pixel of `pm` that is not fully transparent.
+fn painted_bounds(pm: &Pixmap) -> Option<tiny_skia::IntRect> {
+    let w = pm.width() as usize;
+    let px = pm.pixels();
+    let row_has = |y: usize| px[y * w..(y + 1) * w].iter().any(|p| p.alpha() != 0);
+    let top = (0..pm.height() as usize).find(|&y| row_has(y))?;
+    let bottom = (top..pm.height() as usize).rev().find(|&y| row_has(y))?;
+    let (mut left, mut right) = (w, 0);
+    for y in top..=bottom {
+        let row = &px[y * w..(y + 1) * w];
+        if let Some(l) = row[..left].iter().position(|p| p.alpha() != 0) { left = l; }
+        if let Some(r) = row[right..].iter().rposition(|p| p.alpha() != 0) { right += r; }
+    }
+    tiny_skia::IntRect::from_ltrb(left as i32, top as i32, right as i32 + 1, bottom as i32 + 1)
 }
 
 fn pm_clone_opt(pm: &Pixmap, obj: &CaptureObject) -> Option<Pixmap> {
