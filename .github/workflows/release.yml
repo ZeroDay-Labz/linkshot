@@ -54,7 +54,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: tool-bundle
-      - run: tar -C packaging/third-party -xf bundle.tar
+      - run: mkdir -p packaging/third-party && tar -C packaging/third-party -xf bundle.tar
       - name: Build
         run: cargo build --release -p linkshot --locked
       - name: Self-test with the bundled tools
@@ -89,7 +89,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: tool-bundle
-      - run: tar -C packaging/third-party -xf bundle.tar
+      - run: mkdir -p packaging/third-party && tar -C packaging/third-party -xf bundle.tar
       - name: Build
         run: ./packaging/build-windows.sh
       - uses: actions/upload-artifact@v4
@@ -109,7 +109,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: tool-bundle
-      - run: tar -C packaging/third-party -xf bundle.tar
+      - run: mkdir -p packaging/third-party && tar -C packaging/third-party -xf bundle.tar
       - name: Version
         id: v
         run: echo "version=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')" >> "$GITHUB_OUTPUT"
