@@ -70,9 +70,10 @@ A prioritised list from a full read-through of the code on 2026-10-18, followed 
 20. **Smaller notes** — `scene.rs` `dev_rect(...).unwrap()` panics on NaN coordinates from a hostile
     `.snagx`; `snagx.rs` pre-allocates from the zip header; the overlay clears `width_text` but not
     `height_text` after a window click; two full-canvas layers are allocated per shadowed object.
-21. **Feature gaps** — several share destinations per preset, printing, templates, stamps, webcam and
-    microphone in recordings, Windows cursor capture, a prompt before the OCR model download when a
-    build lacks the bundled models.
+21. **Feature gaps** — several share destinations per preset (**done** 0.2.1), printing (**done** 0.3.0),
+    stamps (**done** 0.3.0), webcam and microphone / system audio in recordings (**done** 0.3.0, with
+    Screen Draw), templates, Windows cursor capture, a prompt before the OCR model download when a build
+    lacks the bundled models.
 
 ## Suggested order
 
@@ -98,20 +99,23 @@ offered; "Click a window" hint only where windows are known; own windows are ign
 XKB names for PageUp/PageDown/Backspace in portal triggers; Webcam / Screen Draw / audio toggles greyed
 out until they work.
 
+Fixed in 0.3.0 (**done**): Capture Cursor for still images (KWin `include-cursor`; X11 / Windows still
+without the pointer); Window selection on KDE Wayland through a KWin window list; a compact toolbar for
+whole-monitor recordings; the delay countdown bubble; G video guides and arrow-key nudging in the overlay;
+`show_video_guides`, `mic_muted_alert`, `minimize_fullscreen_controls`, `enable_webcam` are read;
+capture-time effect parameters; hotkeys editable in Preferences; audio / webcam / Screen Draw in
+recordings; printing; stamps.
+
 Still open:
-- **Capture Cursor** for still images is a no-op: the frozen snapshot is taken without the pointer.
-  Take the snapshot with the cursor (KWin `include-cursor`) when the option is on, or draw a cursor
-  object at the recorded position.
-- **Window selection on Wayland**: `windows()` is empty, so Window mode behaves as Region. A KWin
-  script can list windows and their geometry.
-- **Fullscreen recording on a single monitor** places the toolbar inside the region; Snagit shrinks it
-  to a mini bar. Hide it and rely on the hotkeys / tray, or move it to the tray.
-- **Delay countdown**: no visual countdown while the windows are hidden; add a small bottom-right bubble.
 - `--capture` at launch bypasses delay/schedule settings; fullscreen selection always takes the primary
-  monitor (use the pointer's); scrolling direction keys (H/V/B) and horizontal mode; several preferences
-  are stored but never read (`show_video_guides`, `mic_muted_alert`, `hdr_capture`, `tooltip_mode`,
-  `capture_window_pos`); arrow-key nudge / Shift+Enter / G guides in the overlay.
+  monitor (use the pointer's); scrolling direction keys (H/V/B) and horizontal mode; `hdr_capture`,
+  `tooltip_mode` and `capture_window_pos` are stored but never read; Shift+Enter in the overlay.
+- The pointer in still captures on X11 / Windows (xcap has no cursor option; draw a cursor object at the
+  recorded position instead).
 - The GlobalShortcuts portal session is re-created on every rebind (see item 10 above).
+- Audio: the start of a track is aligned by wall clock (within ~50 ms); no per-track volume; no
+  separate mic / system tracks kept after mixing. Webcam on Linux needs `/dev/video*` (inside the
+  Flatpak: `--device=all`).
 
 ## UI/UX audit: Editor (2026-10-18)
 

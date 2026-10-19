@@ -16,7 +16,10 @@ finish-args:
   - --share=ipc
   - --socket=wayland
   - --socket=fallback-x11
-  - --device=dri
+  # Webcams (v4l2) for picture-in-picture recording; includes dri.
+  - --device=all
+  # Microphone and system-audio recording / playback through PipeWire-Pulse or PulseAudio.
+  - --socket=pulseaudio
   # Captures and the library are saved wherever the user chooses.
   - --filesystem=home
   - --filesystem=xdg-run/pipewire-0

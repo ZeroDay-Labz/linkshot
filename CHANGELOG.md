@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.3.0 — 2026-10-19
+
+- **Audio in recordings.** The Video tab records the microphone (device selectable) and system audio
+  ("what you hear"); the recording toolbar has Mic / Audio switches, a level meter, a mute button (M, or
+  the new Ctrl+Shift+M hotkey) and a blinking "microphone is muted" alert. Tracks are kept in sync with
+  the frames (silence while paused), mixed into one WAV next to the lossless master, played back in the
+  Editor (speaker button mutes) and muxed as AAC into MP4 exports. Opened MP4/MOV/WebM files bring their
+  sound track along. Linux captures through the bundled ffmpeg (PipeWire / PulseAudio), Windows through
+  WASAPI (loopback for system audio).
+- **Webcam.** Record Webcam with device, placement (corners or full screen), shape (circle, rounded,
+  square) and "start full screen"; W hides the overlay, Ctrl+Shift+F swaps corner / full screen.
+- **Screen Draw.** D or Ctrl+Shift+D while recording opens a draw layer over the region: A arrow, S
+  square, 1 numbered steps, C colour, Esc done; drawings fade after the configured seconds and are part
+  of the video.
+- **Stamp tool** in the Editor: 14 built-in stamps (check, cross, warning, star, heart, pin, …) plus
+  any PNG/JPG in the stamps folder ("Add stamps…"), placed by clicking the canvas, sized by the Size
+  property.
+- Printing: share destination *Printer* and File ▸ Print (CUPS on Linux, the Print verb on Windows).
+- Capture: the pointer is included in still captures on KDE Plasma when Capture Cursor is on; a
+  "Capturing in N" bubble counts down delayed captures; Window selection works on KDE Plasma Wayland;
+  G toggles 1080p/720p/640×480/320×240 guides and arrow keys nudge the selection in the overlay;
+  capture-time effects have options (border colour/width, shadow size/direction, edge style/sides,
+  filter, trim tolerance); recording a whole monitor uses a compact toolbar in the corner.
+- Preferences: hotkeys (show/hide, repeat, video, mute, draw mode) are editable; webcam, muted-mic alert
+  and compact-toolbar switches.
+- Deleting a saved recording from the tray also removes its lossless master and sound track.
+
 ## 0.2.1 — 2026-10-18
 
 - A second capture trigger while the selection overlay was open re-snapshotted the overlay itself, so

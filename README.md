@@ -50,20 +50,28 @@ Releases are on the [Releases](https://github.com/ZeroDay-Labz/linkshot/releases
   reported ("Lost the overlap – scroll back a little") rather than guessed at.
 * **Video recording**: *Video* in the HUD or the Video tab, Record / Pause / Stop toolbar with countdown and a
   frame around the region, Shift+F9 pause / Shift+F10 stop. Frames are grabbed at native resolution at
-  10/20/30 fps with the pointer and spooled losslessly. The Editor plays the recording (scrubber, frame
-  stepping, in/out points) and saves it as an **animated GIF** (default; presets Screen Video / High
-  Motion / Reduced File Size / Custom) or **MP4** (H.264 through the bundled ffmpeg). Exports always start
-  from the lossless master. Existing GIF/MP4 files open in the player too. Audio and webcam are not
-  recorded yet.
+  10/20/30 fps with the pointer and spooled losslessly. **Microphone and system audio** ("what you hear")
+  are recorded alongside (toolbar switches, M or Ctrl+Shift+M mutes the mic, a level meter and a muted
+  alert), the **webcam** goes in a corner or full screen (circle / rounded / square, W hides it,
+  Ctrl+Shift+F swaps), and **Screen Draw** (D or Ctrl+Shift+D) lets you draw arrows, squares and numbered
+  steps on the recording that fade after a few seconds. Recording a whole monitor shrinks the toolbar
+  to a small bar. The Editor plays the recording with sound (scrubber, frame stepping, in/out points,
+  mute) and saves it as an **animated GIF** (default; presets Screen Video / High Motion / Reduced File
+  Size / Custom) or **MP4** (H.264 + AAC through the bundled ffmpeg). Exports always start from the
+  lossless master. Existing GIF/MP4 files open in the player too, with their sound track.
 * **Grab Text**: the *Grab Text* selection mode or Edit ▸ Grab Text extracts text with the bundled
   Tesseract into a results window with Copy All.
-* **Editor**: Move, Arrow, Line, Shape, Highlight, Text, Callout, Step, Pen, Blur, Magnify, Fill, Crop and
-  Selection tools with properties and quick styles (themes with import/export); undo/redo; arrange; flatten;
-  effects (border, shadow, edges, filters, colour adjustment, colour replacement, scale, trim); rotate/flip;
-  resize; canvas colour; recent-captures tray with pinning; library browser; Copy All; Save / Save As
-  (SNAGX, PNG, JPG, GIF, BMP, TIF, WebP, ICO); share to File / Clipboard / Program / Email. Dark mode is the
-  default (View ▸ Theme), the UI uses the bundled Inter font and renders at the display's native pixel
-  density.
+* **Editor**: Move, Arrow, Line, Shape, Highlight, Text, Callout, Step, Stamp (a built-in set plus your
+  own PNGs), Pen, Blur, Magnify, Fill, Crop and Selection tools with properties and quick styles (themes
+  with import/export); undo/redo; arrange; flatten; effects (border, shadow, edges, filters, colour
+  adjustment, colour replacement, scale, trim); rotate/flip; resize; canvas colour; recent-captures tray
+  with pinning; library browser; Copy All; Save / Save As (SNAGX, PNG, JPG, GIF, BMP, TIF, WebP, ICO);
+  share to File / Clipboard / Program / Email / Printer; File ▸ Print. Dark mode is the default
+  (View ▸ Theme), the UI uses the bundled Inter font and renders at the display's native pixel density.
+* **Capture options**: Capture Cursor (still images too, on KDE Plasma), a "Capturing in N" countdown for
+  delayed captures, video-size guides (G) and arrow-key nudging in the selection overlay, Window selection
+  on KDE Plasma Wayland, and per-effect options (border colour and width, shadow size and direction, edge
+  style and sides, filter, trim tolerance) for capture-time effects. Hotkeys are editable in Preferences.
 * **Print Screen, system-wide**: on first start LinkShot offers to become the default screenshot tool.
   On KDE Plasma and GNOME the desktop then launches a LinkShot capture on Print Screen even when LinkShot
   is closed (Spectacle's or the Shell's Print binding is cleared; other shortcuts are kept), and on Windows
@@ -75,8 +83,8 @@ Releases are on the [Releases](https://github.com/ZeroDay-Labz/linkshot/releases
   prompt-free capture on KDE Plasma Wayland (KWin `ScreenShot2`), the XDG Screenshot portal on other Wayland
   desktops, `xcap` on X11 and Windows.
 
-Not yet: audio and webcam in recordings, stamps, Simplify, Magic Wand, Cut Out, Eraser, templates, cloud
-share destinations, printing.
+Not yet: Simplify, Magic Wand, Cut Out, Eraser, templates, cloud share destinations, the pointer in still
+captures on X11 / Windows, webcam and system audio inside the Flatpak on desktops without PipeWire.
 
 ## Screenshots
 
