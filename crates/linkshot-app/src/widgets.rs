@@ -125,3 +125,40 @@ pub fn transparent_button(ui: &mut Ui, p: &Palette) -> Response {
     ui.painter().line_segment([r.rect.left_bottom() + Vec2::new(3.0, -3.0), r.rect.right_top() + Vec2::new(-3.0, 3.0)], Stroke::new(1.5_f32, Color32::from_rgb(0xE9, 0x42, 0x37)));
     r.on_hover_text("Transparent")
 }
+
+/// A click-then-press hotkey field. `editing` holds the id of the field currently listening.
+/// Returns `(changed, warning)`; bare letters/digits are refused unless `allow_bare`.
+pub fn hotkey_editor(ui: &mut Ui, p: &Palette, hk: &mut linkshot_core::presets::HotKey, editing: &mut Option<String>, id: &str, allow_bare: bool) -> (bool, Option<String>) {
+    use linkshot_core::presets::HotKey;
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(170.0, 22.0), Sense::click());
+    let is_editing = editing.as_deref() == Some(id);
+    let fill = if is_editing { p.input_primary } else if resp.hovered() { p.control_bright } else { p.control };
+    ui.painter().rect_filled(rect, 11.0, fill);
+    ui.painter().rect_stroke(rect, 11.0, egui::Stroke::new(1.0_f32, if is_editing { p.product_bright } else { p.control_outline }), egui::StrokeKind::Inside);
+    let text = if is_editing { "Press keys… (Del clears)".to_string() } else { hk.display() };
+    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, text, egui::FontId::proportional(12.0), if hk.is_none() && !is_editing { p.input_secondary } else { p.text });
+    if resp.clicked() { *editing = if is_editing { None } else { Some(id.to_string()) }; }
+    let mut changed = false;
+    let mut warning = None;
+    if is_editing {
+        let (keys, mods) = ui.ctx().input(|i| (i.keys_down.clone(), i.modifiers));
+        if ui.ctx().input(|i| i.key_pressed(egui::Key::Escape)) { *editing = None; return (false, None); }
+        if ui.ctx().input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace)) { *hk = HotKey::none(); *editing = None; return (true, None); }
+        for k in keys {
+            if let Some(name) = crate::hotkeys::egui_key_to_wpf(k) {
+                if matches!(k, egui::Key::Delete | egui::Key::Backspace | egui::Key::Escape) { continue; }
+                let plain = name.len() == 1 || (name.len() == 2 && name.starts_with('D'));
+                if plain && !allow_bare && !(mods.ctrl || mods.alt || mods.command) {
+                    warning = Some("Add Ctrl, Alt or the Super key: a bare letter or digit would block typing everywhere.".to_string());
+                    continue;
+                }
+                *hk = HotKey { key: name.into(), ctrl: mods.ctrl, alt: mods.alt, shift: mods.shift, win: mods.command && !mods.ctrl };
+                *editing = None;
+                changed = true;
+                break;
+            }
+        }
+        if resp.clicked_elsewhere() { *editing = None; }
+    }
+    (changed, warning)
+}

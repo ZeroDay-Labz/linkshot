@@ -243,7 +243,9 @@ impl EditorState {
             if let Some(stem) = target.file_stem() {
                 let master = paths.recordings_dir().join(format!("{}.lsv", stem.to_string_lossy()));
                 if std::fs::rename(&spool, &master).is_ok() {
-                    if let Some(v) = self.docs.last_mut().unwrap().video.as_mut() { v.master = Some(master.clone()); }
+                    let (wav, master_wav) = (spool.with_extension("wav"), master.with_extension("wav"));
+                    let has_audio = wav.is_file() && std::fs::rename(&wav, &master_wav).is_ok();
+                    if let Some(v) = self.docs.last_mut().unwrap().video.as_mut() { v.master = Some(master.clone()); if has_audio { v.audio = Some(master_wav); } }
                     let format = if gif { video_view::ExportFormat::Gif(video_view::gif_options(&settings.gif_export, (None, None))) } else { video_view::ExportFormat::Mp4(video_view::mp4_options(settings, (None, None))) };
                     self.export_job = Some(video_view::start_export(master, target, format, true, self.wake.clone()));
                 }
@@ -350,7 +352,12 @@ impl EditorState {
                         let _ = linkshot_platform::reveal(&path);
                     }
                 }
-                output_ids::PRINT => { self.set_status("Printing is planned for a later phase; use Save As → PDF/PNG."); }
+                output_ids::PRINT => {
+                    match crate::share::temp_png(&mut self.renderer, doc, &paths.cache_dir.join("print"), &doc.display_name()) {
+                        Ok(path) => match linkshot_platform::print_file(&path) { Ok(()) => self.set_status("Sent to the printer."), Err(e) => self.set_status(format!("Print failed: {e:#}")) },
+                        Err(e) => self.set_status(format!("Print failed: {e:#}")),
+                    }
+                }
                 other => { self.set_status(format!("Share destination {} is not available yet.", output_ids::title(other))); }
             }
         }
@@ -359,11 +366,23 @@ impl EditorState {
     pub fn apply_capture_effect(&mut self, doc: &mut Document, e: &linkshot_core::presets::EffectSettings) {
         let Some(img) = self.renderer.flatten(doc, doc.page()) else { return };
         let out = match e.effect_type {
-            EffectType::EffectBorder => linkshot_render::effects::border(&img, linkshot_core::Argb::BLACK, 4),
-            EffectType::EffectShadow => linkshot_render::effects::shadow(&img, linkshot_core::Argb::BLACK, 12, (1, 1)),
-            EffectType::EffectFilter => linkshot_render::effects::grayscale(&img),
-            EffectType::EffectTrim => linkshot_render::effects::auto_trim(&img, 8),
-            EffectType::EffectEdge => linkshot_render::effects::edge(&img, EdgeType::Torn, 18, false, true, false, true),
+            EffectType::EffectBorder => linkshot_render::effects::border(&img, e.get_color("Color", linkshot_core::Argb::BLACK), e.get_u64("Width", 4).clamp(1, 200) as u32),
+            EffectType::EffectShadow => {
+                let dir = match e.get_str("Direction", "BottomRight").as_str() { "BottomLeft" => (-1, 1), "TopRight" => (1, -1), "TopLeft" => (-1, -1), "Center" => (0, 0), _ => (1, 1) };
+                linkshot_render::effects::shadow(&img, e.get_color("Color", linkshot_core::Argb::BLACK), e.get_u64("Size", 12).clamp(1, 200) as u32, dir)
+            }
+            EffectType::EffectFilter => match e.get_str("Filter", "Grayscale").as_str() {
+                "Invert" => linkshot_render::effects::invert(&img),
+                "Monochrome" => linkshot_render::effects::monochrome(&img, 128),
+                "Soften" => linkshot_render::effects::soften(&img, 2.0),
+                "Sharpen" => linkshot_render::effects::sharpen(&img, 2.0),
+                _ => linkshot_render::effects::grayscale(&img),
+            },
+            EffectType::EffectTrim => linkshot_render::effects::auto_trim(&img, e.get_u64("Tolerance", 8).min(255) as u8),
+            EffectType::EffectEdge => {
+                let kind = e.get_str("EdgeType", "Torn").parse::<EdgeType>().unwrap_or(EdgeType::Torn);
+                linkshot_render::effects::edge(&img, kind, e.get_u64("Size", 18).clamp(2, 200) as u32, e.get_bool("Top", false), e.get_bool("Bottom", true), e.get_bool("Left", false), e.get_bool("Right", true))
+            }
             _ => return,
         };
         self.replace_background(doc, out);
@@ -508,6 +527,18 @@ pub fn editor_ui(app: &mut App, ctx: &egui::Context, actions: &mut Vec<Action>) 
 }
 
 /// Save As (Ctrl+Shift+S, menus): images through the format dialog, videos through GIF/MP4 export.
+/// File ▸ Print: flattens the current image to a PNG in the cache and hands it to the system printer.
+pub fn print_current(app: &mut App) {
+    let Some(i) = app.editor.current else { return };
+    if app.editor.docs[i].is_video() { app.editor.set_status("Videos cannot be printed; save a frame as an image first."); return; }
+    let doc = app.editor.docs[i].doc.clone();
+    let dir = app.paths.cache_dir.join("print");
+    match crate::share::temp_png(&mut app.editor.renderer, &doc, &dir, &doc.display_name()) {
+        Ok(path) => match linkshot_platform::print_file(&path) { Ok(()) => app.editor.set_status("Sent to the printer."), Err(e) => app.editor.set_status(format!("Print failed: {e:#}")) },
+        Err(e) => app.editor.set_status(format!("Print failed: {e:#}")),
+    }
+}
+
 pub fn save_as_current(app: &mut App) {
     let paths = app.paths.clone();
     if !app.editor.save_as(&paths, &mut app.settings) {
@@ -645,6 +676,7 @@ fn editor_menu(app: &mut App, ui: &mut egui::Ui, ctx: &egui::Context, actions: &
         ui.separator();
         if ui.button("Save\tCtrl+S").clicked() { app.editor.save_current(&paths, &app.settings); ui.close(); }
         if ui.button("Save As...\tCtrl+Shift+S").clicked() { save_as_current(app); ui.close(); }
+        if ui.button("Print...\tCtrl+P").clicked() { print_current(app); ui.close(); }
         if ui.button("Duplicate\tCtrl+D").clicked() { if let Some(d) = app.editor.current_doc() { let mut doc = d.doc.clone(); doc.path = None; app.editor.add_document(ctx, doc, &paths, &app.settings); } ui.close(); }
         ui.separator();
         if ui.button("Delete").clicked() { tray::delete_current(app); ui.close(); }
@@ -1156,6 +1188,9 @@ fn preferences_window(app: &mut App, ctx: &egui::Context, _actions: &mut Vec<Act
     let mut open = true;
     let mut changed = false;
     let mut theme_changed = false;
+    let mut rebind = false;
+    let mut hotkey_warning: Option<String> = None;
+    let pal = app.pal;
     egui::Window::new("LinkShot Editor Preferences").open(&mut open).default_width(520.0).show(ctx, |ui| {
         let s = &mut app.settings;
         ui.horizontal(|ui| {
@@ -1170,7 +1205,25 @@ fn preferences_window(app: &mut App, ctx: &egui::Context, _actions: &mut Vec<Act
             changed |= ui.checkbox(&mut s.show_video_guides, "Show video guides").changed();
             changed |= ui.checkbox(&mut s.run_at_startup, "Run LinkShot when the system starts").changed();
             ui.label(egui::RichText::new("Hotkeys").strong());
-            ui.label(format!("Capture: {}    Show/hide: {}    Repeat last capture: {}", app.presets.global_hot_key.display(), s.hotkey_show_hide.display(), s.hotkey_repeat_last.display()));
+            ui.label(egui::RichText::new(format!("Capture: {} (set it under the Capture button)", app.presets.global_hot_key.display())).small());
+            let editing = &mut app.prefs_hotkey_editing;
+            egui::Grid::new("hotkeys-grid").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
+                for (label, id, hk) in [
+                    ("Show / hide LinkShot", "show-hide", &mut s.hotkey_show_hide),
+                    ("Repeat last capture", "repeat", &mut s.hotkey_repeat_last),
+                    ("Video start / pause / resume", "video-start", &mut s.hotkey_video_start_pause),
+                    ("Video stop", "video-stop", &mut s.hotkey_video_stop),
+                    ("Mute / unmute microphone", "mute-mic", &mut s.hotkey_mute_mic),
+                    ("Enter / exit Screen Draw", "draw-mode", &mut s.hotkey_draw_mode),
+                ] {
+                    ui.label(label);
+                    let (c, warn) = crate::widgets::hotkey_editor(ui, &pal, hk, editing, id, false);
+                    if c { changed = true; rebind = true; }
+                    if let Some(w) = warn { hotkey_warning = Some(w); }
+                    ui.end_row();
+                }
+            });
+            if let Some(w) = &hotkey_warning { ui.label(egui::RichText::new(w).small().color(pal.capture_red)); }
             if let Some(e) = &app.hotkeys.error { ui.label(egui::RichText::new(e).small()); }
             ui.label(egui::RichText::new("Default screenshot tool").strong());
             if s.system_print_screen {
@@ -1196,6 +1249,9 @@ fn preferences_window(app: &mut App, ctx: &egui::Context, _actions: &mut Vec<Act
             changed |= ui.checkbox(&mut s.show_ready_to_record, "Show Ready to Record (press Record to start)").changed();
             changed |= ui.checkbox(&mut s.show_video_countdown, "Show countdown before recording").changed();
             changed |= ui.checkbox(&mut s.scale_video_to_1080p, "Scale down recordings larger than 1920×1080").changed();
+            changed |= ui.checkbox(&mut s.minimize_fullscreen_controls, "Minimize the recording controls when recording a whole monitor").changed();
+            changed |= ui.checkbox(&mut s.enable_webcam, "Enable webcam recording").changed();
+            changed |= ui.checkbox(&mut s.mic_muted_alert, "Show an alert when the microphone is muted while recording").changed();
             changed |= ui.checkbox(&mut s.auto_save_videos, "Automatically save new recordings in the Library").changed();
             ui.horizontal(|ui| { ui.label("MP4 quality (CRF, lower is better):"); changed |= ui.add(egui::Slider::new(&mut s.mp4_crf, 10..=30)).changed(); });
             match linkshot_video::ffmpeg::find_ffmpeg() { Some(p) => ui.label(egui::RichText::new(format!("MP4 export and opening MP4 files use ffmpeg at {}", p.display())).small()), None => ui.label(egui::RichText::new("ffmpeg was not found: MP4 export and opening MP4 files are unavailable until it is installed (GIF works without it).").small().color(app.pal.capture_red)) };
@@ -1237,4 +1293,5 @@ fn preferences_window(app: &mut App, ctx: &egui::Context, _actions: &mut Vec<Act
     if changed { app.mark_settings_dirty(); let _ = linkshot_platform::autostart::set_enabled(app.settings.run_at_startup); }
     if !open { app.show_prefs = false; }
     match default_tool_action { Some(true) => app.make_default_tool(), Some(false) => app.undo_default_tool(), None => {} }
+    if rebind { app.register_hotkeys(); }
 }

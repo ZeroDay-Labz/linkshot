@@ -49,10 +49,12 @@ pub struct Mp4Options {
     pub crf: u8,
     pub start_ms: Option<u32>,
     pub end_ms: Option<u32>,
+    /// A WAV track to mux in (AAC), trimmed to the same range.
+    pub audio: Option<PathBuf>,
 }
 
 impl Default for Mp4Options {
-    fn default() -> Self { Self { fps: 0.0, width: 0, height: 0, crf: 18, start_ms: None, end_ms: None } }
+    fn default() -> Self { Self { fps: 0.0, width: 0, height: 0, crf: 18, start_ms: None, end_ms: None, audio: None } }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -92,9 +94,17 @@ pub fn export_mp4(src: &mut dyn FrameSource, opts: &Mp4Options, out: &Path, prog
     cmd.args(["-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-f", "rawvideo", "-pix_fmt", "rgba"])
         .arg("-video_size").arg(format!("{ow}x{oh}"))
         .arg("-framerate").arg(format!("{fps}"))
-        .args(["-i", "pipe:0", "-an"])
-        // H.264 4:2:0 needs even dimensions: pad by a pixel rather than crop content away.
-        .args(["-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2:0:0:color=black"]);
+        .args(["-i", "pipe:0"]);
+    let audio = opts.audio.as_ref().filter(|a| a.is_file());
+    match audio {
+        Some(a) => {
+            cmd.arg("-ss").arg(format!("{:.3}", start as f64 / 1000.0)).arg("-t").arg(format!("{:.3}", (end - start) as f64 / 1000.0)).arg("-i").arg(a)
+                .args(["-map", "0:v:0", "-map", "1:a:0", "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2"]);
+        }
+        None => { cmd.arg("-an"); }
+    }
+    // H.264 4:2:0 needs even dimensions: pad by a pixel rather than crop content away.
+    cmd.args(["-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2:0:0:color=black"]);
     let enc_name = match enc {
         H264Encoder::Libx264 => { cmd.args(["-c:v", "libx264", "-preset", "medium", "-crf", &opts.crf.clamp(0, 51).to_string(), "-pix_fmt", "yuv420p", "-tune", "animation"]); "libx264" }
         H264Encoder::OpenH264 => {
@@ -141,6 +151,8 @@ pub struct ProbeInfo {
     pub height: u32,
     pub fps: f32,
     pub duration_ms: u32,
+    /// The file has an audio stream.
+    pub audio: bool,
 }
 
 
@@ -157,8 +169,10 @@ pub fn probe(path: &Path) -> Result<ProbeInfo> {
 fn parse_probe(text: &str) -> Option<ProbeInfo> {
     let mut duration_ms = 0u32;
     let mut video: Option<(u32, u32, f64)> = None;
+    let mut audio = false;
     for line in text.lines() {
         let t = line.trim();
+        if t.starts_with("Stream #") && t.contains("Audio:") { audio = true; }
         if let Some(rest) = t.strip_prefix("Duration: ") {
             let d = rest.split(',').next().unwrap_or("").trim();
             let parts: Vec<&str> = d.split(':').collect();
@@ -194,7 +208,7 @@ fn parse_probe(text: &str) -> Option<ProbeInfo> {
         }
     }
     let (width, height, fps) = video?;
-    Some(ProbeInfo { width, height, fps: fps as f32, duration_ms })
+    Some(ProbeInfo { width, height, fps: fps as f32, duration_ms, audio })
 }
 
 /// Decodes a video file into a spool at its nominal frame rate (constant frame rate output).

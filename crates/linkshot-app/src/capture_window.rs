@@ -15,6 +15,10 @@ pub struct CaptureWindowState {
     pub renaming: Option<String>,
     pub time_delay_popup: bool,
     pub all_in_one_expanded: bool,
+    /// Audio inputs / cameras for the Video tab popups (refreshed when a popup opens).
+    pub audio_devices: Vec<linkshot_audio::Device>,
+    pub webcam_devices: Vec<linkshot_capture::webcam::WebcamDevice>,
+    pub devices_loaded: Option<std::time::Instant>,
 }
 
 const TAB_W: f32 = 69.0;
@@ -432,6 +436,91 @@ impl App {
         }
     }
 
+    /// Gear next to the Effects combo: the parameters of every active capture effect.
+    fn effect_options(&mut self, ui: &mut egui::Ui) {
+        let pal = self.pal;
+        let has = self.presets.selected().capture_effects.iter().any(|e| e.effect_type != EffectType::EffectNone);
+        if !has { return; }
+        let g = widgets::icon_button(ui, 18.0, "Effect options", pal.control_dark, |p, r| icons::gear_icon(p, r, pal.text));
+        let mut changed = false;
+        let s = self.presets.selected_mut();
+        crate::widgets::popup(&g, false, egui::PopupCloseBehavior::CloseOnClickOutside, |ui| {
+            ui.set_min_width(280.0);
+            for e in s.capture_effects.iter_mut() {
+                ui.label(egui::RichText::new(e.effect_type.label()).strong());
+                match e.effect_type {
+                    EffectType::EffectBorder => {
+                        ui.horizontal(|ui| {
+                            ui.label("Colour:");
+                            let mut c = crate::theme::argb_to_color32(e.get_color("Color", linkshot_core::Argb::BLACK));
+                            if ui.color_edit_button_srgba(&mut c).changed() { e.set_color("Color", crate::theme::color32_to_argb(c)); changed = true; }
+                            ui.label("Width:");
+                            let mut w = e.get_u64("Width", 4) as u32;
+                            if ui.add(egui::DragValue::new(&mut w).range(1..=60).suffix(" px")).changed() { e.set("Width", w as u64); changed = true; }
+                        });
+                    }
+                    EffectType::EffectShadow => {
+                        ui.horizontal(|ui| {
+                            ui.label("Colour:");
+                            let mut c = crate::theme::argb_to_color32(e.get_color("Color", linkshot_core::Argb::BLACK));
+                            if ui.color_edit_button_srgba(&mut c).changed() { e.set_color("Color", crate::theme::color32_to_argb(c)); changed = true; }
+                            ui.label("Size:");
+                            let mut w = e.get_u64("Size", 12) as u32;
+                            if ui.add(egui::DragValue::new(&mut w).range(1..=80).suffix(" px")).changed() { e.set("Size", w as u64); changed = true; }
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Direction:");
+                            let cur = e.get_str("Direction", "BottomRight");
+                            for (name, label) in [("BottomRight", "↘"), ("BottomLeft", "↙"), ("TopRight", "↗"), ("TopLeft", "↖"), ("Center", "•")] {
+                                if ui.selectable_label(cur == name, label).clicked() { e.set("Direction", name); changed = true; }
+                            }
+                        });
+                    }
+                    EffectType::EffectEdge => {
+                        ui.horizontal(|ui| {
+                            ui.label("Style:");
+                            let cur = e.get_str("EdgeType", "Torn");
+                            egui::ComboBox::from_id_salt("edge-type").selected_text(cur.clone()).show_ui(ui, |ui| {
+                                for t in [EdgeType::Torn, EdgeType::Wave, EdgeType::Saw, EdgeType::Sharktooth, EdgeType::Fade, EdgeType::Bevel] {
+                                    if ui.selectable_label(cur == t.as_str(), t.as_str()).clicked() { e.set("EdgeType", t.as_str()); changed = true; }
+                                }
+                            });
+                            ui.label("Size:");
+                            let mut w = e.get_u64("Size", 18) as u32;
+                            if ui.add(egui::DragValue::new(&mut w).range(2..=80).suffix(" px")).changed() { e.set("Size", w as u64); changed = true; }
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Sides:");
+                            for (key, label, def) in [("Top", "Top", false), ("Bottom", "Bottom", true), ("Left", "Left", false), ("Right", "Right", true)] {
+                                let mut on = e.get_bool(key, def);
+                                if ui.checkbox(&mut on, label).changed() { e.set(key, on); changed = true; }
+                            }
+                        });
+                    }
+                    EffectType::EffectFilter => {
+                        ui.horizontal(|ui| {
+                            ui.label("Filter:");
+                            let cur = e.get_str("Filter", "Grayscale");
+                            for name in ["Grayscale", "Invert", "Monochrome", "Soften", "Sharpen"] {
+                                if ui.selectable_label(cur == name, name).clicked() { e.set("Filter", name); changed = true; }
+                            }
+                        });
+                    }
+                    EffectType::EffectTrim => {
+                        ui.horizontal(|ui| {
+                            ui.label("Tolerance:");
+                            let mut t = e.get_u64("Tolerance", 8) as u32;
+                            if ui.add(egui::Slider::new(&mut t, 0..=64)).changed() { e.set("Tolerance", t as u64); changed = true; }
+                        });
+                    }
+                    _ => {}
+                }
+                ui.add_space(4.0);
+            }
+        });
+        if changed { self.mark_presets_dirty(); }
+    }
+
     fn option_toggles(&mut self, ui: &mut egui::Ui, with_time_delay_popup: bool) {
         let pal = self.pal;
         let mut changed = false;
@@ -505,7 +594,10 @@ impl App {
                 self.selection_combo(ui, 164.0, SelectionMode::IMAGE_MENU, SelectionMode::IMAGE_MENU_ADVANCED);
                 ui.end_row();
                 ui.label(egui::RichText::new("Effects:").color(pal.text));
-                self.effects_combo(ui, 164.0);
+                ui.horizontal(|ui| {
+                    self.effects_combo(ui, 164.0);
+                    self.effect_options(ui);
+                });
                 ui.end_row();
                 ui.label(egui::RichText::new("Share:").color(pal.text));
                 self.share_combo(ui, 164.0);
@@ -526,25 +618,100 @@ impl App {
                 ui.label(egui::RichText::new("Share:").color(pal.text));
                 self.share_combo(ui, 164.0);
                 ui.end_row();
-                // Webcam and Screen Draw are not recorded yet: shown greyed out so nobody expects them.
-                ui.label(egui::RichText::new("Webcam:").color(pal.input_secondary));
-                ui.add_enabled_ui(false, |ui| { let mut off = false; widgets::toggle(ui, &pal, &mut off, "Not yet available"); });
+                let cam_ok = linkshot_capture::webcam::available() && self.settings.enable_webcam;
+                ui.label(egui::RichText::new("Webcam:").color(if cam_ok { pal.text } else { pal.input_secondary }));
+                let mut changed = false;
+                ui.horizontal(|ui| {
+                    let s = self.presets.selected_mut();
+                    ui.add_enabled_ui(cam_ok, |ui| {
+                        changed |= widgets::toggle(ui, &pal, &mut s.enable_webcam, "Record Webcam").on_hover_text(if cam_ok { "Record the webcam in a corner of the video (W hides it, Ctrl+Shift+F swaps it full screen)" } else { "Webcam recording is off in Preferences, or ffmpeg is missing" }).changed();
+                    });
+                    let g = widgets::icon_button(ui, 18.0, "Webcam options", pal.control_dark, |p, r| icons::gear_icon(p, r, pal.text));
+                    let cap = &mut self.capture;
+                    crate::widgets::popup(&g, false, egui::PopupCloseBehavior::CloseOnClickOutside, |ui| {
+                        ui.set_min_width(260.0);
+                        if cap.devices_loaded.map(|t| t.elapsed().as_secs() > 15).unwrap_or(true) {
+                            cap.devices_loaded = Some(std::time::Instant::now());
+                            cap.webcam_devices = linkshot_capture::webcam::devices();
+                            cap.audio_devices = linkshot_audio::devices();
+                        }
+                        ui.label(egui::RichText::new("Webcam").strong());
+                        ui.horizontal(|ui| {
+                            ui.label("Device:");
+                            let current = if s.selected_webcam_device.device_path.is_empty() { "First camera found".to_string() } else { cap.webcam_devices.iter().find(|d| d.id == s.selected_webcam_device.device_path).map(|d| d.name.clone()).unwrap_or_else(|| s.selected_webcam_device.display_name.clone()) };
+                            egui::ComboBox::from_id_salt("cam-dev").selected_text(current).width(180.0).show_ui(ui, |ui| {
+                                if ui.selectable_label(s.selected_webcam_device.device_path.is_empty(), "First camera found").clicked() { s.selected_webcam_device = Default::default(); changed = true; }
+                                for d in &cap.webcam_devices {
+                                    if ui.selectable_label(s.selected_webcam_device.device_path == d.id, &d.name).clicked() { s.selected_webcam_device.device_path = d.id.clone(); s.selected_webcam_device.display_name = d.name.clone(); changed = true; }
+                                }
+                                if cap.webcam_devices.is_empty() { ui.label(egui::RichText::new("No camera found").small()); }
+                            });
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Placement:");
+                            egui::ComboBox::from_id_salt("cam-place").selected_text(placement_name(s.selected_webcam_placement)).width(140.0).show_ui(ui, |ui| {
+                                for p in [WebcamPlacement::BottomRight, WebcamPlacement::BottomLeft, WebcamPlacement::TopRight, WebcamPlacement::TopLeft, WebcamPlacement::Fullscreen] { changed |= ui.selectable_value(&mut s.selected_webcam_placement, p, placement_name(p)).changed(); }
+                            });
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Shape:");
+                            egui::ComboBox::from_id_salt("cam-shape").selected_text(shape_name(s.pip_shape)).width(140.0).show_ui(ui, |ui| {
+                                for p in [PreviewClipShape::Circle, PreviewClipShape::Rectangle, PreviewClipShape::RoundedRectangle, PreviewClipShape::Square, PreviewClipShape::RoundedSquare] { changed |= ui.selectable_value(&mut s.pip_shape, p, shape_name(p)).changed(); }
+                            });
+                        });
+                        changed |= ui.checkbox(&mut s.start_webcam, "Start with the webcam full screen").changed();
+                    });
+                });
                 ui.end_row();
-                ui.label(egui::RichText::new("Screen Draw:").color(pal.input_secondary));
-                ui.add_enabled_ui(false, |ui| { let mut off = false; widgets::toggle(ui, &pal, &mut off, "Not yet available"); });
+                ui.label(egui::RichText::new("Screen Draw:").color(pal.text));
+                ui.horizontal(|ui| {
+                    let s = self.presets.selected_mut();
+                    changed |= widgets::toggle(ui, &pal, &mut s.screen_draw_starts_on, "Start in draw mode").on_hover_text(format!("Draw arrows, squares and numbered steps on the recording. Toggle while recording with D in the toolbar or {}.", self.settings.hotkey_draw_mode.display())).changed();
+                    let g = widgets::icon_button(ui, 18.0, "Screen Draw options", pal.control_dark, |p, r| icons::gear_icon(p, r, pal.text));
+                    crate::widgets::popup(&g, false, egui::PopupCloseBehavior::CloseOnClickOutside, |ui| {
+                        ui.set_min_width(220.0);
+                        ui.label(egui::RichText::new("Screen Draw").strong());
+                        ui.horizontal(|ui| { ui.label("Drawings fade after"); changed |= ui.add(egui::DragValue::new(&mut s.screen_draw_fade_delay).range(1..=60)).changed(); ui.label("seconds"); });
+                        ui.label(egui::RichText::new("While drawing: A arrow, S square, 1 numbered steps, C colour, Esc done").small());
+                    });
+                });
                 ui.end_row();
+                if changed { self.mark_presets_dirty(); }
             });
             ui.add_space(12.0);
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 8.0;
                 let mut changed = false;
+                let audio_ok = linkshot_audio::available();
                 let s = self.presets.selected_mut();
                 changed |= widgets::toggle(ui, &pal, &mut s.preview_in_editor, "Preview in Editor").changed();
                 changed |= widgets::toggle(ui, &pal, &mut s.capture_cursor, "Capture Cursor").changed();
-                ui.add_enabled_ui(false, |ui| {
-                    let mut off = false;
-                    widgets::toggle(ui, &pal, &mut off, "Record Microphone");
-                    widgets::toggle(ui, &pal, &mut off, "Record System Audio");
+                ui.horizontal(|ui| {
+                    ui.add_enabled_ui(audio_ok, |ui| {
+                        changed |= widgets::toggle(ui, &pal, &mut s.enable_microphone, "Record Microphone").on_hover_text(if audio_ok { "Record the microphone. Mute it while recording with M in the toolbar or the mute hotkey." } else { "Audio capture needs ffmpeg, which is missing from this installation" }).changed();
+                    });
+                    let g = widgets::icon_button(ui, 18.0, "Choose the microphone", pal.control_dark, |p, r| icons::gear_icon(p, r, pal.text));
+                    let cap = &mut self.capture;
+                    crate::widgets::popup(&g, false, egui::PopupCloseBehavior::CloseOnClickOutside, |ui| {
+                        ui.set_min_width(300.0);
+                        if cap.devices_loaded.map(|t| t.elapsed().as_secs() > 15).unwrap_or(true) {
+                            cap.devices_loaded = Some(std::time::Instant::now());
+                            cap.webcam_devices = linkshot_capture::webcam::devices();
+                            cap.audio_devices = linkshot_audio::devices();
+                        }
+                        ui.label(egui::RichText::new("Microphone").strong());
+                        for d in cap.audio_devices.iter().filter(|d| d.kind == linkshot_audio::Kind::Microphone) {
+                            let selected = if d.is_default { s.selected_microphone.device_path.is_empty() } else { s.selected_microphone.device_path == d.id };
+                            if ui.selectable_label(selected, &d.name).clicked() {
+                                s.selected_microphone = if d.is_default { Default::default() } else { linkshot_core::presets::HardwareDeviceInfo { device_path: d.id.clone(), display_name: d.name.clone(), ..Default::default() } };
+                                changed = true;
+                            }
+                        }
+                        if cap.audio_devices.is_empty() { ui.label(egui::RichText::new("No audio input found").small()); }
+                    });
+                });
+                ui.add_enabled_ui(audio_ok, |ui| {
+                    changed |= widgets::toggle(ui, &pal, &mut s.enable_system_audio, "Record System Audio").on_hover_text("Record what you hear (the default output's monitor)").changed();
                 });
                 if changed { self.mark_presets_dirty(); }
                 ui.horizontal(|ui| {
@@ -554,8 +721,16 @@ impl App {
                     let b = ui.radio_value(&mut gif, false, "MP4").changed();
                     if a || b { self.settings.default_video_format = if gif { "GIF".into() } else { "MP4".into() }; self.mark_settings_dirty(); }
                 });
-                ui.label(egui::RichText::new(format!("{} fps · Shift+F9 pause · Shift+F10 stop · audio, webcam and screen draw not yet available", self.settings.video_quality.fps())).small().color(pal.input_secondary));
+                ui.label(egui::RichText::new(format!("{} fps · {} pause · {} stop · {} mute mic", self.settings.video_quality.fps(), self.settings.hotkey_video_start_pause.display(), self.settings.hotkey_video_stop.display(), self.settings.hotkey_mute_mic.display())).small().color(pal.input_secondary));
             });
         });
     }
+}
+
+fn placement_name(p: WebcamPlacement) -> &'static str {
+    match p { WebcamPlacement::Fullscreen => "Full screen", WebcamPlacement::TopLeft => "Top left", WebcamPlacement::TopRight => "Top right", WebcamPlacement::BottomLeft => "Bottom left", WebcamPlacement::BottomRight => "Bottom right" }
+}
+
+fn shape_name(s: PreviewClipShape) -> &'static str {
+    match s { PreviewClipShape::Circle => "Circle", PreviewClipShape::Rectangle => "Rectangle", PreviewClipShape::RoundedRectangle => "Rounded rectangle", PreviewClipShape::Square => "Square", PreviewClipShape::RoundedSquare => "Rounded square" }
 }

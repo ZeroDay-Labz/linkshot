@@ -2479,6 +2479,7 @@ dependencies = [
  "global-hotkey",
  "image",
  "ksni",
+ "linkshot-audio",
  "linkshot-capture",
  "linkshot-core",
  "linkshot-ocr",
@@ -2497,6 +2498,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "linkshot-audio"
+version = "0.2.1"
+dependencies = [
+ "anyhow",
+ "linkshot-tools",
+ "tracing",
+ "wasapi",
+]
+
+[[package]]
 name = "linkshot-capture"
 version = "0.2.1"
 dependencies = [
@@ -2507,8 +2518,10 @@ dependencies = [
  "enigo",
  "enumflags2",
  "image",
+ "linkshot-audio",
  "linkshot-core",
  "linkshot-platform",
+ "linkshot-tools",
  "linkshot-video",
  "serde",
  "thiserror 2.0.21",
@@ -2600,6 +2613,7 @@ dependencies = [
  "crossbeam-channel",
  "gif",
  "image",
+ "linkshot-audio",
  "linkshot-tools",
  "lz4_flex",
  "serde",
@@ -2839,6 +2853,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "num-integer"
+version = "0.1.47"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ce2d95d4b3734dc35aa2f45e1aa22cd416814592a4f9d9205e11affd5b8e10b"
+dependencies = [
+ "num-traits",
 ]
 
 [[package]]
@@ -5124,6 +5147,19 @@ checksum = "29790946404f91d9c5d06f9874efddea1dc06c5efe94541a7d6863108e3a5e4b"
 dependencies = [
  "same-file",
  "winapi-util",
+]
+
+[[package]]
+name = "wasapi"
+version = "0.26.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1b5f8804a710cf7a18b07610225abb127e562f3249a1f3ed88a6f045c5444910"
+dependencies = [
+ "log",
+ "num-integer",
+ "thiserror 2.0.21",
+ "windows 0.62.2",
+ "windows-core 0.62.2",
 ]
 
 [[package]]

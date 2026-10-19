@@ -24,6 +24,7 @@ pub mod wayland_outputs;
 
 pub mod stitch;
 pub mod video;
+pub mod webcam;
 pub mod scroll_input;
 pub mod scrolling;
 
@@ -191,6 +192,9 @@ pub fn monitors() -> Result<Vec<MonitorInfo>> {
 }
 
 pub fn windows() -> Result<Vec<WindowInfo>> {
+    #[cfg(target_os = "linux")]
+    if is_wayland() { return if kwin::is_kde() { kwin::window_list() } else { Ok(vec![]) }; }
+    #[cfg(not(target_os = "linux"))]
     if is_wayland() { return Ok(vec![]); }
     let list = xcap::Window::all().context("enumerate windows")?;
     let mut out = Vec::new();
@@ -228,7 +232,12 @@ pub fn capture_window(id: u32) -> Result<RgbaImage> {
 }
 
 /// Captures every monitor (used for the frozen overlay background and fullscreen captures).
-pub fn snapshot() -> Result<Snapshot> {
+pub fn snapshot() -> Result<Snapshot> { snapshot_with_cursor(false) }
+
+/// [`snapshot`] with the pointer drawn in where the back-end can (KWin); the "Capture Cursor" option.
+pub fn snapshot_with_cursor(include_cursor: bool) -> Result<Snapshot> {
+    #[cfg(not(target_os = "linux"))]
+    let _ = include_cursor;
     #[cfg(target_os = "linux")]
     if is_wayland() {
         let monitors = monitors()?;
@@ -238,12 +247,15 @@ pub fn snapshot() -> Result<Snapshot> {
             let mut images = Vec::new();
             let mut ok = true;
             for m in &monitors {
-                match kwin::capture_screen(&m.name, false) {
+                match kwin::capture_screen(&m.name, include_cursor) {
                     Ok(img) => images.push(img),
                     Err(e) => { tracing::warn!("KWin ScreenShot2 unavailable ({e:#}); falling back to the portal"); ok = false; break; }
                 }
             }
-            if ok { return Ok(Snapshot { monitors, images, windows: vec![], taken_at: std::time::Instant::now() }); }
+            if ok {
+                let windows = kwin::window_list().unwrap_or_else(|e| { tracing::debug!("KWin window list: {e:#}"); vec![] });
+                return Ok(Snapshot { monitors, images, windows, taken_at: std::time::Instant::now() });
+            }
         }
         let composite = portal::screenshot()?;
         // The portal returns one image covering the whole (logical) desktop in physical pixels.

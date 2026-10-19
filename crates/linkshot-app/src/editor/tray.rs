@@ -133,6 +133,7 @@ pub fn remove_doc(app: &mut App, i: usize, delete_file: bool) {
                 if ok != rfd::MessageDialogResult::Yes { return; }
             }
             let _ = std::fs::remove_file(p);
+            if let Some(m) = super::video_view::master_for(p, &app.paths) { let _ = std::fs::remove_file(m.with_extension("wav")); let _ = std::fs::remove_file(m); }
         }
     }
     app.editor.docs.remove(i);

@@ -36,7 +36,20 @@ pub struct VideoDoc {
     pub looping: bool,
     pub error: Option<String>,
     scrub_drag: bool,
+    /// The mixed sound track (`<master stem>.wav`), when the recording or file has one.
+    pub audio: Option<PathBuf>,
+    pub audio_muted: bool,
+    playback: Option<linkshot_audio::Playback>,
 }
+
+/// The sound track recorded with (or extracted for) a spool: `<spool stem>.wav`.
+pub fn audio_for(master: &Path) -> Option<PathBuf> {
+    let p = master.with_extension("wav");
+    p.is_file().then_some(p)
+}
+
+/// Audio starts a little after it is asked for; begin that much later so it lines up with the frames.
+const PLAYBACK_LATENCY_MS: u32 = 70;
 
 impl VideoDoc {
     /// A video whose spool already exists (a finished recording, or a file decoded earlier).
@@ -44,7 +57,8 @@ impl VideoDoc {
         let reader = SpoolReader::open(&master)?;
         let (width, height, frames, duration_ms) = (reader.width(), reader.height(), reader.len(), reader.duration_ms());
         let player = Player::spawn(Box::new(reader), wake.clone());
-        Ok(Self { file, master: Some(master), loading: None, player: Some(player), wake, frame: None, texture: None, tex_index: None, playing: false, position_ms: 0, duration_ms, width, height, frames, in_ms: None, out_ms: None, looping: false, error: None, scrub_drag: false })
+        let audio = audio_for(&master);
+        Ok(Self { file, master: Some(master), loading: None, player: Some(player), wake, frame: None, texture: None, tex_index: None, playing: false, position_ms: 0, duration_ms, width, height, frames, in_ms: None, out_ms: None, looping: false, error: None, scrub_drag: false, audio, audio_muted: false, playback: None })
     }
 
     /// A GIF/MP4 file: decoded into the cache in the background (the poster is shown meanwhile).
@@ -58,13 +72,36 @@ impl VideoDoc {
             let _ = tx.send(res);
             w();
         });
-        Self { file: Some(file), master: None, loading: Some(rx), player: None, wake, frame: None, texture: None, tex_index: None, playing: false, position_ms: 0, duration_ms: 0, width: 0, height: 0, frames: 0, in_ms: None, out_ms: None, looping: false, error: None, scrub_drag: false }
+        Self { file: Some(file), master: None, loading: Some(rx), player: None, wake, frame: None, texture: None, tex_index: None, playing: false, position_ms: 0, duration_ms: 0, width: 0, height: 0, frames: 0, in_ms: None, out_ms: None, looping: false, error: None, scrub_drag: false, audio: None, audio_muted: false, playback: None }
     }
 
     pub fn is_ready(&self) -> bool { self.player.is_some() }
     pub fn send(&self, c: PlayerCmd) { if let Some(p) = &self.player { p.send(c); } }
     pub fn toggle_play(&mut self) { if self.playing { self.send(PlayerCmd::Pause); } else { self.send(PlayerCmd::Play); } }
-    pub fn seek(&mut self, ms: u32) { self.position_ms = ms.min(self.duration_ms); self.send(PlayerCmd::Seek(self.position_ms)); }
+    pub fn seek(&mut self, ms: u32) { self.position_ms = ms.min(self.duration_ms); self.send(PlayerCmd::Seek(self.position_ms)); self.playback = None; }
+    pub fn has_audio(&self) -> bool { self.audio.is_some() }
+    pub fn toggle_audio_mute(&mut self) {
+        self.audio_muted = !self.audio_muted;
+        if self.audio_muted { self.playback = None; } else if self.playing { let at = self.position_ms; self.start_audio(at); }
+    }
+    fn start_audio(&mut self, at_ms: u32) {
+        self.playback = None;
+        if self.audio_muted { return; }
+        let Some(a) = &self.audio else { return };
+        match linkshot_audio::Playback::start(a, at_ms + PLAYBACK_LATENCY_MS, 1.0) {
+            Ok(p) => self.playback = Some(p),
+            Err(e) => { tracing::warn!("audio playback: {e:#}"); self.audio_muted = true; }
+        }
+    }
+    /// Keeps the sound track on the frames: (re)starts it after seeks, loops and drift.
+    fn sync_audio(&mut self) {
+        if !self.playing || self.audio.is_none() || self.audio_muted { return; }
+        let restart = match &self.playback {
+            Some(p) => (p.position_ms() as i64 - self.position_ms as i64).abs() > 400,
+            None => true,
+        };
+        if restart { let at = self.position_ms; self.start_audio(at); }
+    }
     /// Export range from the in/out points.
     pub fn range(&self) -> (Option<u32>, Option<u32>) { (self.in_ms, self.out_ms) }
 
@@ -81,19 +118,20 @@ impl VideoDoc {
                         }
                         Err(e) => self.error = Some(format!("{e:#}")),
                     }
+                    if let Some(m) = &self.master { self.audio = audio_for(m); }
                 }
                 Ok(Err(e)) => { self.loading = None; self.error = Some(format!("{e:#}")); }
                 Err(_) => {}
             }
         }
-        if let Some(p) = &self.player {
-            while let Ok(ev) = p.rx.try_recv() {
-                match ev {
-                    PlayerEvent::Frame(f) => { self.position_ms = f.pts_ms; self.frame = Some(f); }
-                    PlayerEvent::Playing(b) => self.playing = b,
-                    PlayerEvent::Ended => { self.playing = false; self.position_ms = self.duration_ms; }
-                    PlayerEvent::Error(e) => self.error = Some(e),
-                }
+        let mut events = vec![];
+        if let Some(p) = &self.player { while let Ok(ev) = p.rx.try_recv() { events.push(ev); } }
+        for ev in events {
+            match ev {
+                PlayerEvent::Frame(f) => { self.position_ms = f.pts_ms; self.frame = Some(f); self.sync_audio(); }
+                PlayerEvent::Playing(b) => { self.playing = b; if b { self.sync_audio(); } else { self.playback = None; } }
+                PlayerEvent::Ended => { self.playing = false; self.position_ms = self.duration_ms; self.playback = None; }
+                PlayerEvent::Error(e) => self.error = Some(e),
             }
         }
     }
@@ -234,6 +272,19 @@ fn transport_ui(app: &mut App, ui: &mut egui::Ui, rect: Rect, _ctx: &egui::Conte
     let time = format!("{} / {}", linkshot_video::format_duration(pos), linkshot_video::format_duration(dur));
     ui.painter().text(Pos2::new(x, cy), Align2::LEFT_CENTER, &time, crate::theme::medium(12.5), pal.text_bright);
     x += 118.0;
+    // Speaker: the recording's sound track (click to mute).
+    let (has_audio, muted) = { let v = app.editor.docs[i].video.as_ref().unwrap(); (v.has_audio(), v.audio_muted) };
+    if has_audio {
+        if glyph_btn(ui, &mut x, 32.0, if muted { "Unmute" } else { "Mute" }, true, &|p, r| {
+            let c = if muted { pal.text } else { fg };
+            let body = Rect::from_min_max(Pos2::new(r.left() + 1.0, r.center().y - 4.0), Pos2::new(r.left() + 6.0, r.center().y + 4.0));
+            p.rect_filled(body, 1.0, c);
+            p.add(egui::Shape::convex_polygon(vec![Pos2::new(r.left() + 6.0, r.center().y - 4.0), Pos2::new(r.left() + 12.0, r.center().y - 9.0), Pos2::new(r.left() + 12.0, r.center().y + 9.0), Pos2::new(r.left() + 6.0, r.center().y + 4.0)], c, Stroke::NONE));
+            if muted { p.line_segment([Pos2::new(r.left() + 2.0, r.center().y + 9.0), Pos2::new(r.right() - 1.0, r.center().y - 9.0)], Stroke::new(2.0_f32, pal.capture_red)); }
+            else { for (k, rad) in [4.0f32, 8.0].iter().enumerate() { p.add(egui::Shape::line(arc_points(Pos2::new(r.left() + 12.0, r.center().y), *rad + 2.0, -0.9, 0.9, 8), Stroke::new(1.5_f32, c.gamma_multiply(1.0 - k as f32 * 0.25)))); } }
+        }) { app.editor.docs[i].video.as_mut().unwrap().toggle_audio_mute(); }
+        x += 4.0;
+    }
 
     // Right side: in/out + save buttons.
     let mut rx = rect.right() - 12.0;
@@ -346,6 +397,8 @@ pub fn start_export(master: PathBuf, target: PathBuf, format: ExportFormat, auto
     let (tx, rx) = crossbeam_channel::unbounded();
     let label = format!("Saving {}…", target.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default());
     let (m, t) = (master.clone(), target.clone());
+    // MP4 carries the sound track that sits next to the master.
+    let format = match format { ExportFormat::Mp4(mut o) => { if o.audio.is_none() { o.audio = audio_for(&master); } ExportFormat::Mp4(o) } g => g };
     std::thread::Builder::new().name("linkshot-export".into()).spawn(move || {
         let res = (|| -> anyhow::Result<PathBuf> {
             let mut src = SpoolReader::open(&m)?;
@@ -370,7 +423,7 @@ pub fn gif_options(s: &GifExportSettings, range: (Option<u32>, Option<u32>)) -> 
 }
 
 pub fn mp4_options(settings: &Settings, range: (Option<u32>, Option<u32>)) -> Mp4Options {
-    Mp4Options { fps: 0.0, width: 0, height: 0, crf: settings.mp4_crf, start_ms: range.0, end_ms: range.1 }
+    Mp4Options { fps: 0.0, width: 0, height: 0, crf: settings.mp4_crf, start_ms: range.0, end_ms: range.1, audio: None }
 }
 
 /// The "Create Animated GIF" dialog state.
@@ -542,6 +595,10 @@ pub fn export_progress_ui(app: &App, ui: &mut egui::Ui, canvas_rect: Rect, ctx: 
     ui.painter().rect_filled(Rect::from_min_max(bar.min, Pos2::new(bar.left() + bar.width() * job.progress.clamp(0.0, 1.0), bar.bottom())), 3.0, pal.product);
     let _ = icons::camera_icon;
     ctx.request_repaint_after(std::time::Duration::from_millis(100));
+}
+
+fn arc_points(c: Pos2, r: f32, a0: f32, a1: f32, n: usize) -> Vec<Pos2> {
+    (0..=n).map(|k| { let a = a0 + (a1 - a0) * k as f32 / n as f32; Pos2::new(c.x + r * a.cos(), c.y + r * a.sin()) }).collect()
 }
 
 /// Finds the lossless master recorded alongside a saved video (`recordings/<stem>.lsv`).

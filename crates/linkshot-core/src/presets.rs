@@ -181,6 +181,14 @@ pub struct EffectSettings {
 impl Default for EffectSettings {
     fn default() -> Self { Self { effect_type: EffectType::EffectNone, params: Default::default() } }
 }
+impl EffectSettings {
+    pub fn get_u64(&self, key: &str, default: u64) -> u64 { self.params.get(key).and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse().ok()))).unwrap_or(default) }
+    pub fn get_str(&self, key: &str, default: &str) -> String { self.params.get(key).and_then(|v| v.as_str()).map(str::to_string).unwrap_or_else(|| default.to_string()) }
+    pub fn get_bool(&self, key: &str, default: bool) -> bool { self.params.get(key).and_then(|v| v.as_bool().or_else(|| v.as_str().map(|s| s == "true"))).unwrap_or(default) }
+    pub fn get_color(&self, key: &str, default: crate::Argb) -> crate::Argb { self.params.get(key).and_then(|v| v.as_u64()).map(|v| crate::Argb::from_u32(v as u32)).unwrap_or(default) }
+    pub fn set(&mut self, key: &str, value: impl Into<serde_json::Value>) { self.params.insert(key.to_string(), value.into()); }
+    pub fn set_color(&mut self, key: &str, c: crate::Argb) { self.set(key, c.to_u32() as u64); }
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase", default)]

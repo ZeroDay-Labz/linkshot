@@ -407,6 +407,33 @@ pub fn run_selftest() -> anyhow::Result<()> {
                 let px = &back.frame(0)?[(50 * 160 + 5) * 4..][..3];
                 anyhow::ensure!(px[0] > 180 && px[1] < 140 && px[2] < 100, "mp4 frame 0 colour {px:?}");
                 println!("selftest: MP4 via {} ({}, {} KB), decoded back to {} frames", ff.display(), rep.encoder, rep.bytes / 1024, back.len());
+                // Audio: two synthetic tracks (as the recorder writes them) mixed, muxed into an MP4 and extracted back.
+                let mk = |name: &str, freq: f32| -> anyhow::Result<std::path::PathBuf> {
+                    let p = tmp.join(name);
+                    let mut w = linkshot_audio::WavWriter::create(&p)?;
+                    let n = 48_000 * 3 / 2;
+                    let mut buf = Vec::with_capacity(n * 4);
+                    for i in 0..n { let v = ((i as f32 / 48_000.0 * freq * 2.0 * std::f32::consts::PI).sin() * 12_000.0) as i16; buf.extend_from_slice(&v.to_le_bytes()); buf.extend_from_slice(&v.to_le_bytes()); }
+                    w.write(&buf)?;
+                    w.finish()?;
+                    Ok(p)
+                };
+                let mixed = master.with_extension("wav");
+                linkshot_audio::mix(&[mk("mic.wav", 440.0)?, mk("sys.wav", 660.0)?], &mixed)?;
+                let mix_ms = linkshot_audio::wav_duration_ms(&mixed).unwrap_or(0);
+                anyhow::ensure!((1400..=1600).contains(&mix_ms), "mixed track should be ~1500 ms, got {mix_ms}");
+                let mp4a = tmp.join("rec-audio.mp4");
+                let mut src = linkshot_video::SpoolReader::open(&master)?;
+                let opts = linkshot_video::Mp4Options { audio: Some(mixed.clone()), start_ms: Some(300), ..Default::default() };
+                linkshot_video::export_mp4(&mut src, &opts, &mp4a, &mut |_| true)?;
+                let probe = linkshot_video::ffmpeg::probe(&mp4a)?;
+                anyhow::ensure!(probe.audio, "the MP4 should carry an audio stream");
+                let back_wav = tmp.join("back.wav");
+                anyhow::ensure!(linkshot_audio::extract(&mp4a, &back_wav)?, "audio should extract from the MP4");
+                let back_ms = linkshot_audio::wav_duration_ms(&back_wav).unwrap_or(0);
+                anyhow::ensure!((1000..=1350).contains(&back_ms), "trimmed audio should be ~1200 ms, got {back_ms}");
+                anyhow::ensure!(crate::editor::video_view::audio_for(&master).is_some(), "audio_for should find the track next to the master");
+                println!("selftest: audio mixed ({mix_ms} ms), muxed into MP4 from 0.3 s and extracted back ({back_ms} ms)");
             }
             None => println!("selftest: ffmpeg not found, MP4 export skipped"),
         }

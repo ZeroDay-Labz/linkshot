@@ -64,7 +64,16 @@ pub fn open_video(path: &Path, master: Option<&Path>, cache_dir: &Path, progress
     let tmp = spool.with_extension("part");
     let result = if ext == "gif" { gif_to_spool(path, &tmp, progress).map(|_| ()) } else { crate::ffmpeg::decode_to_spool(path, &tmp, progress).map(|_| ()) };
     match result {
-        Ok(()) => { std::fs::rename(&tmp, &spool).context("move decoded spool")?; SpoolReader::open(&spool) }
+        Ok(()) => {
+            std::fs::rename(&tmp, &spool).context("move decoded spool")?;
+            // The sound track, when the file has one, sits next to the spool so the player and the
+            // MP4 exporter find it the same way as for a recording.
+            if ext != "gif" {
+                let wav = spool.with_extension("wav");
+                match linkshot_audio::extract(path, &wav) { Ok(true) => {}, Ok(false) => { let _ = std::fs::remove_file(&wav); }, Err(e) => tracing::warn!("audio of {}: {e:#}", path.display()) }
+            }
+            SpoolReader::open(&spool)
+        }
         Err(e) => { let _ = std::fs::remove_file(&tmp); Err(e) }
     }
 }

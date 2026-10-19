@@ -9,6 +9,7 @@ members = [
     "crates/linkshot-ocr",
     "crates/linkshot-video",
     "crates/linkshot-tools",
+    "crates/linkshot-audio",
 ]
 
 [workspace.package]
@@ -25,6 +26,7 @@ linkshot-platform = { path = "crates/linkshot-platform" }
 linkshot-ocr = { path = "crates/linkshot-ocr" }
 linkshot-video = { path = "crates/linkshot-video" }
 linkshot-tools = { path = "crates/linkshot-tools" }
+linkshot-audio = { path = "crates/linkshot-audio" }
 
 anyhow = "1"
 thiserror = "2"

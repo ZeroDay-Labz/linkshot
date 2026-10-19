@@ -8,6 +8,8 @@ description = "Screen, window and region capture for linkshot"
 [dependencies]
 linkshot-core.workspace = true
 linkshot-video.workspace = true
+linkshot-audio.workspace = true
+linkshot-tools.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

@@ -23,7 +23,7 @@ fn main() -> anyhow::Result<()> {
     }
     let spool = out.join("rectest.lsv");
     let t0 = Instant::now();
-    let rec = Recorder::start(region, RecordOptions { fps, include_cursor: true, max_size: None, spool_path: spool.clone() }, || {});
+    let rec = Recorder::start(region, RecordOptions { fps, include_cursor: true, max_size: None, spool_path: spool.clone(), ..Default::default() }, || {});
     let mut stopped = false;
     let result = loop {
         if !stopped && t0.elapsed().as_secs_f64() >= seconds { rec.send(Command::Stop); stopped = true; }

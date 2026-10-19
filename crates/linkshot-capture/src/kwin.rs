@@ -501,3 +501,40 @@ fn js_str(s: &str) -> String {
     out.push('"');
     out
 }
+
+/// Visible windows on the current desktop (bottom to top) from KWin's scripting API, for Window
+/// selection on Wayland where no other API lists other apps' windows.
+pub fn window_list() -> Result<Vec<crate::WindowInfo>> {
+    let text = run_probe(r#"
+const list = (typeof workspace.stackingOrder !== "undefined") ? workspace.stackingOrder : workspace.clientList();
+const out = [];
+for (let i = 0; i < list.length; i++) {
+    const w = list[i];
+    if (!w || w.deleted || w.minimized) continue;
+    if (w.desktopWindow || w.dock || w.popupWindow || w.splash || w.notification || w.onScreenDisplay || w.tooltip || w.criticalNotification) continue;
+    if (!(w.normalWindow || w.dialog || w.utility)) continue;
+    if (w.resourceClass == "kwin_wayland" || w.resourceClass == "xwaylandvideobridge" || w.hidden) continue;
+    if (w.frameGeometry.width < 2 || w.frameGeometry.height < 2) continue;
+    if (typeof w.onCurrentDesktop !== "undefined" && !w.onCurrentDesktop) continue;
+    const g = w.frameGeometry;
+    out.push([i, w.caption, w.resourceClass, Math.round(g.x), Math.round(g.y), Math.round(g.width), Math.round(g.height), (typeof w.maximizable !== "undefined" && w.maximizeMode) ? 1 : 0].map(v => String(v).replace(/[\t\n]/g, " ")).join("\t"));
+}
+REPORT(out.join("\n"));
+"#)?;
+    let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+    let n = lines.len();
+    let mut out = Vec::new();
+    for (k, line) in lines.iter().enumerate() {
+        let f: Vec<&str> = line.split('\t').collect();
+        if f.len() < 7 { continue; }
+        let num = |i: usize| f[i].parse::<i64>().unwrap_or(0);
+        out.push(crate::WindowInfo {
+            id: num(0) as u32, title: f[1].to_string(), app_name: f[2].to_string(),
+            x: num(3) as i32, y: num(4) as i32, width: num(5).max(0) as u32, height: num(6).max(0) as u32,
+            is_minimized: false, is_maximized: f.get(7).map(|v| *v == "1").unwrap_or(false),
+            // Lower z = nearer the top (see `Snapshot::window_at`).
+            z_order: n - 1 - k,
+        });
+    }
+    Ok(out)
+}

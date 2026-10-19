@@ -12,6 +12,7 @@ mod keepalive;
 mod overlay;
 mod raise;
 mod recording_hud;
+mod screen_draw;
 mod scrolling_hud;
 mod grab_text;
 mod share;

@@ -11,6 +11,7 @@ pub enum HotkeyEvent {
     VideoStartPause,
     VideoStop,
     DrawMode,
+    MuteMic,
     Preset(String),
 }
 
@@ -211,6 +212,7 @@ mod portal {
                     HotkeyEvent::VideoStartPause => ("video-start".to_string(), "Video start/pause/resume".to_string()),
                     HotkeyEvent::VideoStop => ("video-stop".to_string(), "Video stop".to_string()),
                     HotkeyEvent::DrawMode => ("draw-mode".to_string(), "Enter/exit draw mode".to_string()),
+                    HotkeyEvent::MuteMic => ("mute-mic".to_string(), "Mute/unmute the microphone".to_string()),
                     HotkeyEvent::Preset(p) => (format!("preset-{i}-{}", p.chars().filter(|c| c.is_ascii_alphanumeric()).collect::<String>()), "Capture with preset".to_string()),
                 };
                 (id, desc, trigger(hk), ev.clone())

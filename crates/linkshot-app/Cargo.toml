@@ -29,6 +29,7 @@ linkshot-platform.workspace = true
 linkshot-ocr.workspace = true
 linkshot-video.workspace = true
 linkshot-tools.workspace = true
+linkshot-audio.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

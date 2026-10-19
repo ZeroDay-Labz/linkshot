@@ -70,6 +70,31 @@ pub fn compose_email(address: &str, subject: &str, body: &str) -> Result<()> {
     open_url(&format!("mailto:{}?subject={}&body={}", address, enc(subject), enc(body)))
 }
 
+/// Sends an image file to the printer: CUPS (`lp`, then `lpr`) on Linux, the shell "Print" verb on
+/// Windows (which opens the system print dialog for pictures).
+pub fn print_file(path: &std::path::Path) -> Result<()> {
+    #[cfg(target_os = "linux")]
+    {
+        for (tool, args) in [("lp", vec!["-o", "fit-to-page"]), ("lpr", vec![])] {
+            match std::process::Command::new(tool).args(&args).arg(path).stdin(std::process::Stdio::null()).output() {
+                Ok(o) if o.status.success() => return Ok(()),
+                Ok(o) => anyhow::bail!("{tool}: {}", String::from_utf8_lossy(&o.stderr).trim()),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(e) => anyhow::bail!("{tool}: {e}"),
+            }
+        }
+        anyhow::bail!("no print spooler found (install CUPS: lp / lpr)")
+    }
+    #[cfg(windows)]
+    {
+        let p = path.to_string_lossy().replace('\'', "''");
+        std::process::Command::new("powershell").args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &format!("Start-Process -FilePath '{p}' -Verb Print")]).spawn().context("start the print dialog")?;
+        Ok(())
+    }
+    #[cfg(not(any(target_os = "linux", windows)))]
+    { open_path(path) }
+}
+
 /// Reveals a file in the file manager when possible, otherwise opens its folder.
 pub fn reveal(path: &std::path::Path) -> Result<()> {
     if let Some(parent) = path.parent() { open_path(parent) } else { Ok(()) }

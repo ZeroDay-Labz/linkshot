@@ -112,6 +112,8 @@ pub struct Settings {
     pub hotkey_video_start_pause: crate::presets::HotKey,
     pub hotkey_video_stop: crate::presets::HotKey,
     pub hotkey_draw_mode: crate::presets::HotKey,
+    /// Mute / unmute the microphone while recording.
+    pub hotkey_mute_mic: crate::presets::HotKey,
 
     // Editor
     pub editor_workspace_color: crate::Argb,
@@ -209,6 +211,7 @@ impl Default for Settings {
             hotkey_video_start_pause: HotKey { key: "F9".into(), shift: true, ..Default::default() },
             hotkey_video_stop: HotKey { key: "F10".into(), shift: true, ..Default::default() },
             hotkey_draw_mode: HotKey { key: "D".into(), ctrl: true, shift: true, ..Default::default() },
+            hotkey_mute_mic: HotKey { key: "M".into(), ctrl: true, shift: true, ..Default::default() },
             editor_workspace_color: crate::Argb::rgb(0x1C, 0x19, 0x15),
             tray_thumbnail_size: TrayThumbnailSize::Medium,
             auto_expand_canvas: true,

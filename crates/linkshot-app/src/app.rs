@@ -51,7 +51,16 @@ struct PendingCapture {
     due: Instant,
     /// The windows have been hidden for the capture (`hide_linkshot_during_capture`).
     hidden: bool,
+    /// Show the "Capturing in N" bubble (Delay captures of a second or more).
+    countdown: bool,
+    /// Bottom-right corner position for the bubble (logical coordinates of the primary monitor).
+    bubble_pos: Option<[f32; 2]>,
+    bubble_placed: bool,
 }
+
+const COUNTDOWN_TITLE: &str = "LinkShot Countdown";
+const COUNTDOWN_W: f32 = 170.0;
+const COUNTDOWN_H: f32 = 64.0;
 
 /// Viewport id of the Capture window (a child of the invisible root, see `keepalive.rs`).
 pub fn capture_viewport_id() -> egui::ViewportId { egui::ViewportId::from_hash_of("capture-window") }
@@ -84,6 +93,8 @@ pub struct App {
     last_save: Instant,
     pub show_prefs: bool,
     pub show_about: bool,
+    /// Which hotkey field in Preferences is listening for keys.
+    pub prefs_hotkey_editing: Option<String>,
     /// First-run question: make LinkShot the system's screenshot tool (Print Screen).
     pub show_default_prompt: bool,
     /// Was the Capture window visible when the current capture started? Only then does it come back.
@@ -100,7 +111,7 @@ impl App {
         if capture_now {
             let settings = app.presets.selected().clone();
             app.last_capture = Some(settings.clone());
-            app.pending = Some(PendingCapture { settings, due: Instant::now() + Duration::from_millis(50), hidden: false });
+            app.pending = Some(PendingCapture { settings, due: Instant::now() + Duration::from_millis(50), hidden: false, countdown: false, bubble_pos: None, bubble_placed: false });
         }
         app
     }
@@ -160,6 +171,7 @@ impl App {
             settings_dirty: false,
             last_save: Instant::now(),
             show_prefs: false,
+            prefs_hotkey_editing: None,
             show_about: false,
             show_default_prompt: false,
             capture_was_visible: false,
@@ -238,6 +250,8 @@ impl App {
             (self.settings.hotkey_repeat_last.clone(), HotkeyEvent::RepeatLast),
             (self.settings.hotkey_video_start_pause.clone(), HotkeyEvent::VideoStartPause),
             (self.settings.hotkey_video_stop.clone(), HotkeyEvent::VideoStop),
+            (self.settings.hotkey_mute_mic.clone(), HotkeyEvent::MuteMic),
+            (self.settings.hotkey_draw_mode.clone(), HotkeyEvent::DrawMode),
         ];
         for p in &self.presets.presets { b.push((p.hot_key.clone(), HotkeyEvent::Preset(p.id.clone()))); }
         // When the desktop itself launches `linkshot --capture` on Print Screen, claiming the key here too
@@ -404,8 +418,10 @@ impl App {
         }
         let mut delay = Duration::from_millis(50);
         let mut schedule = false;
+        let mut countdown = false;
         if settings.time_delay && settings.timed_capture_type == TimedCaptureType::Delay {
             delay += Duration::from_secs(settings.delay_duration.max(1) as u64);
+            countdown = true;
         }
         if settings.time_delay && settings.timed_capture_type == TimedCaptureType::Schedule {
             match chrono::NaiveDateTime::parse_from_str(settings.scheduled_capture_time.trim(), "%Y-%m-%d %H:%M") {
@@ -430,7 +446,10 @@ impl App {
             hidden = true;
             delay += Duration::from_millis(300);
         }
-        self.pending = Some(PendingCapture { settings, due: Instant::now() + delay, hidden });
+        let bubble_pos = if countdown {
+            linkshot_capture::monitors().ok().and_then(|ms| ms.iter().find(|m| m.is_primary).or(ms.first()).map(|m| [m.x as f32 + m.width as f32 - COUNTDOWN_W - 24.0, m.y as f32 + m.height as f32 - COUNTDOWN_H - 72.0]))
+        } else { None };
+        self.pending = Some(PendingCapture { settings, due: Instant::now() + delay, hidden, countdown, bubble_pos, bubble_placed: false });
         crate::keepalive::wake_after(ctx, delay);
     }
 
@@ -449,7 +468,7 @@ impl App {
         }
         self.capture_toggled = false;
         let settings = self.pending.take().unwrap().settings;
-        match linkshot_capture::snapshot() {
+        match linkshot_capture::snapshot_with_cursor(settings.capture_cursor) {
             Err(e) => { self.set_status(format!("Capture failed: {e:#}")); self.restore_windows(ctx); }
             Ok(snap) => {
                 let primary = snap.monitors.iter().position(|m| m.is_primary).unwrap_or(0);
@@ -473,7 +492,9 @@ impl App {
                     }
                     _ => {
                         let idx = primary;
-                        self.overlay = Some(Overlay::new(snap, idx, settings, self.settings.show_magnifier));
+                        let mut o = Overlay::new(snap, idx, settings, self.settings.show_magnifier);
+                        o.show_guides = self.settings.show_video_guides;
+                        self.overlay = Some(o);
                     }
                 }
             }
@@ -545,7 +566,14 @@ impl App {
         let stamp = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S");
         let spool = self.paths.recordings_dir().join(format!("recording-{stamp}.lsv"));
         let ready_first = self.settings.show_ready_to_record && !self.settings.auto_start_recording;
-        self.recording = Some(RecordingUi::new(region, monitor, monitors, settings, fps, max_size, spool, ready_first, self.settings.show_video_countdown, self.wake()));
+        let mut settings = settings;
+        if !self.settings.enable_webcam { settings.enable_webcam = false; }
+        let setup = crate::recording_hud::RecordingSetup {
+            region, monitor, monitors, settings, fps, max_size, spool_path: spool, ready_first,
+            show_countdown: self.settings.show_video_countdown, mic_alert: self.settings.mic_muted_alert, mute_hotkey: self.settings.hotkey_mute_mic.display(),
+            minimize_fullscreen: self.settings.minimize_fullscreen_controls, draw_hotkey: self.settings.hotkey_draw_mode.display(),
+        };
+        self.recording = Some(RecordingUi::new(setup, self.wake()));
     }
 
     fn recording_update(&mut self, ctx: &egui::Context) {
@@ -557,8 +585,17 @@ impl App {
             rec.ui(ctx, &pal);
             if ctx.input(|i| i.viewport().close_requested()) { rec.cancel(); }
         });
-        // Frame strips: only where we can position windows (KDE Wayland via KWin, or X11/Windows).
+        // Screen Draw layer over the region (click-through until draw mode is on).
         let can_place = !linkshot_capture::is_wayland() || cfg!(target_os = "linux") && linkshot_capture::kwin::is_kde();
+        if can_place && rec.result.is_none() {
+            if let Some(d) = rec.draw.as_mut() {
+                if d.needs_window() {
+                    let b = d.viewport_builder();
+                    ctx.show_viewport_immediate(egui::ViewportId::from_hash_of("screen-draw"), b, |ctx, _class| { d.ui(ctx, &pal); });
+                }
+            }
+        }
+        // Frame strips: only where we can position windows (KDE Wayland via KWin, or X11/Windows).
         if can_place && rec.result.is_none() {
             for (i, strip) in rec.frame_strips().into_iter().enumerate() {
                 let b = rec.frame_builder(i, strip);
@@ -575,7 +612,7 @@ impl App {
             None => { self.set_status("Recording cancelled."); self.restore_windows(ctx); }
             Some(recording) => {
                 let info = &recording.spool;
-                self.set_status(format!("Recorded {} frames ({}×{}, {}).", info.frames, info.width, info.height, linkshot_video::format_duration(info.duration_ms)));
+                self.set_status(format!("Recorded {} frames ({}×{}, {}){}.", info.frames, info.width, info.height, linkshot_video::format_duration(info.duration_ms), if recording.audio.is_some() { " with audio" } else { "" }));
                 self.settings.capture_count += 1;
                 self.mark_settings_dirty();
                 let paths = self.paths.clone();
@@ -651,7 +688,8 @@ impl App {
                     }
                 }
                 HotkeyEvent::VideoStop => { if let Some(r) = self.recording.as_mut() { r.stop(); } }
-                HotkeyEvent::DrawMode => {}
+                HotkeyEvent::MuteMic => { if let Some(r) = self.recording.as_mut() { r.toggle_mic_mute(); } }
+                HotkeyEvent::DrawMode => { if let Some(r) = self.recording.as_mut() { r.toggle_draw(); } }
             }
         }
         for ev in self.tray.poll() {
@@ -681,7 +719,7 @@ impl App {
                 *last = Instant::now();
                 let settings = settings.clone();
                 let discard = settings.interval_discard_identical;
-                if let Ok(snap) = linkshot_capture::snapshot() {
+                if let Ok(snap) = linkshot_capture::snapshot_with_cursor(settings.capture_cursor) {
                     let idx = snap.monitors.iter().position(|m| m.is_primary).unwrap_or(0);
                     let img = match settings.selection_mode {
                         SelectionMode::SelectionModeRegion if settings.selection_settings_region.region_selection_type == RegionSelectionType::RegionSelectionFixed => snap.crop(settings.selection_settings_region.rect()),
@@ -776,6 +814,36 @@ impl eframe::App for App {
                         let monitors: Vec<linkshot_core::Rect> = overlay.snapshot.monitors.iter().map(|m| m.rect()).collect();
                         self.start_recording(ctx, region, monitor, monitors, settings);
                     }
+                }
+            }
+        }
+
+        // "Capturing in N" bubble for delayed captures (bottom-right of the primary monitor).
+        if let Some(p) = self.pending.as_mut() {
+            let remaining = p.due.saturating_duration_since(Instant::now());
+            if p.countdown && remaining > Duration::from_millis(400) {
+                if let Some(pos) = p.bubble_pos {
+                    #[cfg(target_os = "linux")]
+                    if !p.bubble_placed && linkshot_capture::is_wayland() && linkshot_capture::kwin::is_kde() {
+                        p.bubble_placed = true;
+                        std::thread::spawn(move || { std::thread::sleep(Duration::from_millis(150)); if let Err(e) = linkshot_capture::kwin::setup_overlay_window(COUNTDOWN_TITLE, pos[0].round() as i32, pos[1].round() as i32, COUNTDOWN_W as i32, COUNTDOWN_H as i32) { tracing::debug!("countdown placement: {e:#}"); } });
+                    }
+                    let pal = self.pal;
+                    let secs = remaining.as_secs_f32().ceil().max(1.0) as u32;
+                    let builder = egui::ViewportBuilder::default().with_title(COUNTDOWN_TITLE).with_app_id("linkshot").with_decorations(false).with_transparent(true)
+                        .with_always_on_top().with_taskbar(false).with_resizable(false).with_mouse_passthrough(true).with_inner_size([COUNTDOWN_W, COUNTDOWN_H]).with_position(pos);
+                    ctx.show_viewport_immediate(egui::ViewportId::from_hash_of("countdown"), builder, |ctx, _class| {
+                        egui::CentralPanel::default().frame(egui::Frame::NONE.fill(egui::Color32::TRANSPARENT)).show(ctx, |ui| {
+                            let r = ui.max_rect().shrink(2.0);
+                            let p = ui.painter();
+                            p.rect_filled(r, 10.0, pal.dark_panel);
+                            p.rect_stroke(r, 10.0, egui::Stroke::new(1.0_f32, pal.control_outline), egui::StrokeKind::Inside);
+                            p.text(egui::Pos2::new(r.left() + 14.0, r.center().y), egui::Align2::LEFT_CENTER, "Capturing in", egui::FontId::proportional(14.0), pal.text_bright);
+                            p.circle_filled(egui::Pos2::new(r.right() - 32.0, r.center().y), 22.0, pal.capture_red);
+                            p.text(egui::Pos2::new(r.right() - 32.0, r.center().y), egui::Align2::CENTER_CENTER, secs.to_string(), crate::theme::semibold(24.0), egui::Color32::WHITE);
+                        });
+                        ctx.request_repaint_after(Duration::from_millis(200));
+                    });
                 }
             }
         }

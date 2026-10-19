@@ -37,6 +37,8 @@ pub struct Overlay {
     textures: Vec<Option<egui::TextureHandle>>,
     phase: Phase,
     pub show_magnifier: bool,
+    /// Video-size guides (1080p/720p/640×480/320×240) while dragging; G toggles.
+    pub show_guides: bool,
     pub result: Option<OverlayResult>,
     hover_window: Option<LRect>,
     hud_drag: Vec2,
@@ -59,7 +61,7 @@ pub struct Overlay {
 impl Overlay {
     pub fn new(snapshot: Snapshot, monitor_idx: usize, settings: CaptureSettings, show_magnifier: bool) -> Self {
         let n = snapshot.monitors.len();
-        Self { snapshot, settings, textures: (0..n).map(|_| None).collect(), phase: Phase::Selecting { drag_start: None }, show_magnifier, result: None, hover_window: None, hud_drag: Vec2::ZERO, resize: None, width_text: String::new(), height_text: String::new(), frames: 0, placement_started: false, active_monitor: monitor_idx, single_monitor: None, single_resolved: false, drag_point: std::cell::Cell::new(Pt::new(0.0, 0.0)) }
+        Self { snapshot, settings, textures: (0..n).map(|_| None).collect(), phase: Phase::Selecting { drag_start: None }, show_magnifier, show_guides: false, result: None, hover_window: None, hud_drag: Vec2::ZERO, resize: None, width_text: String::new(), height_text: String::new(), frames: 0, placement_started: false, active_monitor: monitor_idx, single_monitor: None, single_resolved: false, drag_point: std::cell::Cell::new(Pt::new(0.0, 0.0)) }
     }
 
     /// Logical rect of the monitor that best contains `r` (for placing HUDs next to it).
@@ -135,6 +137,7 @@ impl Overlay {
             let enter = ctx.input(|i| i.key_pressed(egui::Key::Enter));
             if esc { self.result = Some(OverlayResult::Cancel); return; }
             if ctx.input(|i| i.key_pressed(egui::Key::M)) { self.show_magnifier = !self.show_magnifier; }
+            if ctx.input(|i| i.key_pressed(egui::Key::G)) { self.show_guides = !self.show_guides; }
 
             // Window under the cursor (not while dragging).
             if has_pointer && matches!(self.phase, Phase::Selecting { drag_start: None }) {
@@ -164,6 +167,19 @@ impl Overlay {
                         self.set_last_drag_point(cur);
                         let vr = self.rect_to_view(m, view, r);
                         dim_outside(&painter, view, vr);
+                        if self.show_guides && self.settings.capture_mode != CaptureMode::CaptureModeImage {
+                            let sx = if cur.x >= start.x { 1.0 } else { -1.0 };
+                            let sy = if cur.y >= start.y { 1.0 } else { -1.0 };
+                            for (gw, gh, name) in [(1920.0, 1080.0, "1080p"), (1280.0, 720.0, "720p"), (640.0, 480.0, "640×480"), (320.0, 240.0, "320×240")] {
+                                let g = self.rect_to_view(m, view, LRect::from_points(start, Pt::new(start.x + gw * sx, start.y + gh * sy)));
+                                let c = Color32::from_rgba_unmultiplied(0x4F, 0xC3, 0xF7, 200);
+                                for (a, b) in [(g.left_top(), g.right_top()), (g.right_top(), g.right_bottom()), (g.right_bottom(), g.left_bottom()), (g.left_bottom(), g.left_top())] {
+                                    painter.add(egui::Shape::dashed_line(&[a, b], Stroke::new(1.0_f32, c), 6.0, 4.0));
+                                }
+                                let corner = Pos2::new(if sx > 0.0 { g.right() - 4.0 } else { g.left() + 4.0 }, if sy > 0.0 { g.bottom() - 4.0 } else { g.top() + 4.0 });
+                                painter.text(corner, if sx > 0.0 { if sy > 0.0 { Align2::RIGHT_BOTTOM } else { Align2::RIGHT_TOP } } else if sy > 0.0 { Align2::LEFT_BOTTOM } else { Align2::LEFT_TOP }, name, FontId::proportional(11.0), c);
+                            }
+                        }
                         painter.rect_stroke(vr, 0.0, Stroke::new(1.5_f32, orange), egui::StrokeKind::Outside);
                         draw_handles(&painter, vr.intersect(view), orange);
                         let r_round = r.round_out();
@@ -207,7 +223,13 @@ impl Overlay {
                             else if enter { let r = self.mrect(m); self.set_dims(r); self.phase = Phase::Selected { rect: r }; self.hud_drag = Vec2::ZERO; }
                         }
                         // help hint
-                        let hint = if self.snapshot.windows.is_empty() { "Drag to select a region  •  Enter: whole screen  •  Shift 1:1 / Ctrl 16:9  •  M: magnifier  •  Esc: cancel" } else { "Drag to select a region  •  Click a window  •  Enter: fullscreen  •  Shift 1:1 / Ctrl 16:9  •  M: magnifier  •  Esc: cancel" };
+                        let video = self.settings.capture_mode != CaptureMode::CaptureModeImage;
+                        let hint = match (self.snapshot.windows.is_empty(), video) {
+                            (true, false) => "Drag to select a region  •  Enter: whole screen  •  Shift 1:1 / Ctrl 16:9  •  M: magnifier  •  Esc: cancel",
+                            (false, false) => "Drag to select a region  •  Click a window  •  Enter: fullscreen  •  Shift 1:1 / Ctrl 16:9  •  M: magnifier  •  Esc: cancel",
+                            (true, true) => "Drag to select a region  •  Enter: whole screen  •  Shift 1:1 / Ctrl 16:9  •  G: video guides  •  M: magnifier  •  Esc: cancel",
+                            (false, true) => "Drag to select a region  •  Click a window  •  Enter: fullscreen  •  Shift 1:1 / Ctrl 16:9  •  G: guides  •  M: magnifier  •  Esc: cancel",
+                        };
                         let hint_r = Rect::from_center_size(Pos2::new(view.center().x, view.top() + 30.0), Vec2::new(840.0, 32.0));
                         painter.rect_filled(hint_r.translate(Vec2::new(0.0, 2.0)), 16.0, Color32::from_black_alpha(60));
                         painter.rect_filled(hint_r, 16.0, Color32::from_rgba_unmultiplied(0x17, 0x1B, 0x20, 225));
@@ -215,6 +237,27 @@ impl Overlay {
                     }
                 }
                 Phase::Selected { rect } => {
+                    // Arrow keys nudge the selection by a pixel (Shift: 10).
+                    if !ctx.wants_keyboard_input() {
+                        let (dx, dy) = ctx.input(|i| {
+                            let s = if i.modifiers.shift { 10.0 } else { 1.0 };
+                            let mut d = (0.0, 0.0);
+                            if i.key_pressed(egui::Key::ArrowLeft) { d.0 -= s; }
+                            if i.key_pressed(egui::Key::ArrowRight) { d.0 += s; }
+                            if i.key_pressed(egui::Key::ArrowUp) { d.1 -= s; }
+                            if i.key_pressed(egui::Key::ArrowDown) { d.1 += s; }
+                            d
+                        });
+                        if dx != 0.0 || dy != 0.0 {
+                            let (w, h) = (rect.width(), rect.height());
+                            let x = (rect.min.x + dx).clamp(virt.min.x, (virt.max.x - w).max(virt.min.x));
+                            let y = (rect.min.y + dy).clamp(virt.min.y, (virt.max.y - h).max(virt.min.y));
+                            let nr = LRect::from_xywh(x, y, w, h);
+                            self.set_dims(nr);
+                            self.phase = Phase::Selected { rect: nr };
+                            return;
+                        }
+                    }
                     let r = rect;
                     let vr = self.rect_to_view(m, view, r);
                     dim_outside(&painter, view, vr);

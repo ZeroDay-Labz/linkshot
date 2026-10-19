@@ -13,6 +13,7 @@ serde.workspace = true
 serde_json.workspace = true
 crossbeam-channel.workspace = true
 linkshot-tools.workspace = true
+linkshot-audio.workspace = true
 gif = "0.14"
 color_quant = "1.1"
 lz4_flex = { version = "0.11", default-features = false, features = ["safe-encode", "safe-decode", "frame"] }
