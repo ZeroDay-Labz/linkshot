@@ -37,7 +37,7 @@ for f in sorted(need): shutil.copy(os.path.join(src, f), dst)
 print(f"{len(need)} DLLs")
 PY
 # The installer's DLLs carry debug info (libtesseract alone is ~100 MB); strip it.
-for f in "$OUT"/windows/tesseract/*.dll "$OUT"/windows/tesseract/tesseract.exe; do mingw-strip --strip-all "$f" 2>/dev/null || llvm-strip --strip-all "$f"; done
+for f in "$OUT"/windows/tesseract/*.dll "$OUT"/windows/tesseract/tesseract.exe; do mingw-strip --strip-all "$f" 2>/dev/null || x86_64-w64-mingw32-strip --strip-all "$f" 2>/dev/null || llvm-strip --strip-all "$f"; done
 cp "$TW/tessdata/eng.traineddata" "$TW/tessdata/osd.traineddata" "$TW/tessdata/pdf.ttf" "$OUT/windows/tesseract/tessdata/"
 cp -r "$TW/tessdata/configs" "$TW/tessdata/tessconfigs" "$OUT/windows/tesseract/tessdata/"
 cp "$SRC/text-detection.rten" "$SRC/text-recognition.rten" "$OUT/windows/ocrs/"

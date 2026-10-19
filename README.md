@@ -144,6 +144,9 @@ flatpak run org.flatpak.Builder --user --force-clean --install-deps-from=flathub
 flatpak build-bundle packaging/flatpak/repo dist/LinkShot-<version>.flatpak io.github.zerodaylabz.LinkShot
 ```
 
+Pushing a `v*` tag runs the same steps on GitHub Actions (`.github/workflows/release.yml`) and publishes
+the release with all four packages and checksums; running that workflow by hand only builds the artifacts.
+
 A system `ffmpeg` or `tesseract` is used when the bundle is missing (development builds), and
 `LINKSHOT_FFMPEG` / `LINKSHOT_TESSERACT` / `LINKSHOT_TOOLS` override the lookup.
 

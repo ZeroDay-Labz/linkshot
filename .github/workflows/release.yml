@@ -1,0 +1,151 @@
+name: Release
+
+# Pushing a tag such as v0.4.1 builds every package with the bundled tools and publishes a GitHub
+# release with them. Running the workflow by hand (workflow_dispatch) builds the same artifacts
+# without publishing, which is the way to test it.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  bundles:
+    name: Tool bundles (ffmpeg, Tesseract, OCR models)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends curl unzip xz-utils p7zip-full binutils binutils-mingw-w64-x86-64 llvm python3
+      - name: Fetch and assemble
+        run: |
+          ./packaging/fetch-tools.sh
+          ./packaging/make-bundles.sh
+          tar -C packaging/third-party -cf bundle.tar bundle
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tool-bundle
+          path: bundle.tar
+          retention-days: 1
+
+  linux:
+    name: Linux packages (deb, rpm)
+    needs: bundles
+    # An older glibc keeps the packages installable on more distributions.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgtk-3-dev libxcb1-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libxkbcommon-dev libwayland-dev libpipewire-0.3-dev libdbus-1-dev libfontconfig1-dev libgbm-dev clang
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: cargo-bins/cargo-binstall@main
+      - run: cargo binstall -y cargo-deb cargo-generate-rpm
+      - uses: actions/download-artifact@v4
+        with:
+          name: tool-bundle
+      - run: tar -C packaging/third-party -xf bundle.tar
+      - name: Build
+        run: cargo build --release -p linkshot --locked
+      - name: Self-test with the bundled tools
+        run: LINKSHOT_TOOLS=$PWD/packaging/third-party/bundle/linux ./target/release/linkshot --selftest
+      - name: Package
+        run: |
+          cargo deb -p linkshot --no-build
+          cargo generate-rpm -p crates/linkshot-app
+          mkdir -p dist && cp target/debian/*.deb target/generate-rpm/*.rpm dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-packages
+          path: dist/*
+
+  windows:
+    name: Windows executable
+    needs: bundles
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends zstd binutils-mingw-w64-x86-64 python3-pip
+          pip3 install ziglang
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-gnu
+      - uses: Swatinem/rust-cache@v2
+      - uses: cargo-bins/cargo-binstall@main
+      - run: cargo binstall -y cargo-zigbuild
+      - uses: actions/download-artifact@v4
+        with:
+          name: tool-bundle
+      - run: tar -C packaging/third-party -xf bundle.tar
+      - name: Build
+        run: ./packaging/build-windows.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-exe
+          path: dist/*.exe
+
+  flatpak:
+    name: Flatpak
+    needs: bundles
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-25.08
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: tool-bundle
+      - run: tar -C packaging/third-party -xf bundle.tar
+      - name: Version
+        id: v
+        run: echo "version=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')" >> "$GITHUB_OUTPUT"
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          manifest-path: packaging/flatpak/io.github.zerodaylabz.LinkShot.yml
+          bundle: LinkShot-${{ steps.v.outputs.version }}.flatpak
+          cache: false
+          upload-artifact: false
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flatpak-bundle
+          path: LinkShot-*.flatpak
+
+  release:
+    name: Publish release
+    needs: [linux, windows, flatpak]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Collect
+        run: |
+          mkdir -p dist
+          find artifacts -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.exe' -o -name '*.flatpak' \) -exec cp {} dist/ \;
+          cd dist && sha256sum * > SHA256SUMS.txt && ls -la
+      - name: Release notes from the changelog
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          awk -v v="$V" '$0 ~ "^## "v" " {f=1; next} /^## / {f=0} f' CHANGELOG.md > notes.md
+          printf '\n### Downloads\n\n| Platform | File |\n|---|---|\n| Windows 10/11 (x64) | `LinkShot-%s-windows-x64.exe` (single file, nothing else to install) |\n| Fedora / RHEL / openSUSE | `linkshot-%s-1.x86_64.rpm` |\n| Debian / Ubuntu | `linkshot_%s-1_amd64.deb` |\n| Any Linux | `LinkShot-%s.flatpak` |\n\nffmpeg, Tesseract (+ English data) and the OCR models are inside every package. `SHA256SUMS.txt` lists the checksums.\n' "$V" "$V" "$V" "$V" >> notes.md
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: LinkShot ${{ github.ref_name }}
+          body_path: notes.md
+          files: dist/*
