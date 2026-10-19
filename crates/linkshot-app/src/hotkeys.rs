@@ -187,6 +187,7 @@ mod portal {
             "Oem2" => "slash".to_string(), "Oem3" => "grave".to_string(), "OemMinus" => "minus".to_string(), "OemPlus" => "equal".to_string(),
             "Oem4" => "bracketleft".to_string(), "Oem6" => "bracketright".to_string(), "Oem5" => "backslash".to_string(), "Oem1" => "semicolon".to_string(),
             "Oem7" => "apostrophe".to_string(), "OemComma" => "comma".to_string(), "OemPeriod" => "period".to_string(),
+            "PageUp" => "Prior".to_string(), "PageDown" => "Next".to_string(), "Back" => "BackSpace".to_string(),
             "Return" => "Return".to_string(), "Space" => "space".to_string(), "Up" => "Up".to_string(), "Down" => "Down".to_string(), "Left" => "Left".to_string(), "Right" => "Right".to_string(),
             k if k.len() == 2 && k.starts_with('D') => k[1..].to_string(),
             k if k.len() == 1 => k.to_lowercase(),

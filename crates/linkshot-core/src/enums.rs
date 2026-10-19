@@ -55,10 +55,8 @@ impl SelectionMode {
         Self::SelectionModeRegion, Self::SelectionModeWindow, Self::SelectionModeFullscreen,
         Self::SelectionModePanoramic, Self::SelectionModeScrollingWindow, Self::SelectionModeOcr,
     ];
-    pub const IMAGE_MENU_ADVANCED: &'static [SelectionMode] = &[
-        Self::SelectionModeObject, Self::SelectionModeMultipleArea, Self::SelectionModeMenu,
-        Self::SelectionModeClipboard, Self::SelectionModeFreehand, Self::SelectionModeFile,
-    ];
+    /// Object, Multiple Area, Menu and Freehand selection are not implemented yet and are not offered.
+    pub const IMAGE_MENU_ADVANCED: &'static [SelectionMode] = &[Self::SelectionModeClipboard, Self::SelectionModeFile];
     pub const ALL_IN_ONE_MENU: &'static [SelectionMode] =
         &[Self::SelectionModeRegion, Self::SelectionModeWindow, Self::SelectionModeFullscreen];
     pub const VIDEO_MENU: &'static [SelectionMode] = &[Self::SelectionModeRegion, Self::SelectionModeWindow];

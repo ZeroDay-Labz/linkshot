@@ -520,7 +520,6 @@ impl SavedPresets {
                             (_, "HotKeyModifiers") => { let (ctrl, alt, shift, win) = HotKey::parse_modifiers(v); c.hot_key.ctrl = ctrl; c.hot_key.alt = alt; c.hot_key.shift = shift; c.hot_key.win = win; }
                             _ => {}
                         }
-                        for e in c.capture_effects.iter_mut() { let _ = e; }
                         if (path.len() == 1 && matches!(name.as_str(), "AllInOne" | "Image" | "Video" | "OneClick")) || (path.len() == 2 && path[1] == "Presets") {
                             if c.share_destination_ids.is_empty() { c.share_destination_ids.push(output_ids::NONE.into()); }
                             out.push(cur.take().unwrap());

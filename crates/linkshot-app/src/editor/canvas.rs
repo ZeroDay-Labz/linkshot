@@ -59,11 +59,11 @@ pub fn canvas_ui(app: &mut App, ui: &mut egui::Ui, rect: Rect, ctx: &egui::Conte
         // Empty state: camera glyph, headline and a hint, centred on the workspace.
         let c = rect.center();
         let ring = Rect::from_center_size(c - Vec2::new(0.0, 46.0), Vec2::splat(72.0));
-        ui.painter().circle_filled(ring.center(), 36.0, Color32::from_white_alpha(14));
-        ui.painter().circle_stroke(ring.center(), 36.0, Stroke::new(1.0_f32, Color32::from_white_alpha(30)));
-        crate::icons::camera_icon(ui.painter(), ring.shrink(20.0), Color32::from_white_alpha(170));
-        ui.painter().text(c + Vec2::new(0.0, 12.0), Align2::CENTER_CENTER, "Take a capture or open an image to get started", crate::theme::semibold(16.0), Color32::from_white_alpha(190));
-        ui.painter().text(c + Vec2::new(0.0, 38.0), Align2::CENTER_CENTER, "Press PrintScreen, click Capture, or drop an image here", FontId::proportional(13.0), Color32::from_white_alpha(110));
+        ui.painter().circle_filled(ring.center(), 36.0, pal.control);
+        ui.painter().circle_stroke(ring.center(), 36.0, Stroke::new(1.0_f32, pal.control_outline));
+        crate::icons::camera_icon(ui.painter(), ring.shrink(20.0), pal.text);
+        ui.painter().text(c + Vec2::new(0.0, 12.0), Align2::CENTER_CENTER, "Take a capture or open an image to get started", crate::theme::semibold(16.0), pal.text);
+        ui.painter().text(c + Vec2::new(0.0, 38.0), Align2::CENTER_CENTER, "Press Print Screen, click Capture, or drop an image here", FontId::proportional(13.0), pal.input_secondary);
         return;
     };
     let (dw, dh) = { let p = app.editor.docs[i].doc.page(); (p.capture_canvas_width as f32, p.capture_canvas_height as f32) };
@@ -147,16 +147,6 @@ pub fn canvas_ui(app: &mut App, ui: &mut egui::Ui, rect: Rect, ctx: &egui::Conte
     if let (Some(t), Some(tile)) = (&app.editor.canvas.texture, app.editor.canvas.tile) {
         let tr = Rect::from_min_size(img_rect.min + Vec2::new(tile.0 as f32 / ppp, tile.1 as f32 / ppp), Vec2::new(tile.2 as f32 / ppp, tile.3 as f32 / ppp));
         clip.image(t.id(), tr, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
-    }
-    // Canvas edge handles (expand canvas) when using the Move tool
-    if app.editor.tool == linkshot_core::enums::ToolMode::VectorSelection && app.editor.tools.drag.is_none() {
-        for p in [img_rect.center_top(), img_rect.center_bottom(), img_rect.left_center(), img_rect.right_center(), img_rect.left_bottom(), img_rect.right_bottom(), img_rect.left_top()] {
-            clip.rect_filled(Rect::from_center_size(p, Vec2::splat(7.0)), 1.0, Color32::WHITE);
-            clip.rect_stroke(Rect::from_center_size(p, Vec2::splat(7.0)), 1.0, Stroke::new(1.0_f32, pal.input_secondary), egui::StrokeKind::Outside);
-        }
-        // yellow diamond: rounded corners
-        let d = img_rect.right_top() + Vec2::new(-10.0, 10.0);
-        clip.add(egui::Shape::convex_polygon(vec![d + Vec2::new(0.0, -6.0), d + Vec2::new(6.0, 0.0), d + Vec2::new(0.0, 6.0), d + Vec2::new(-6.0, 0.0)], pal.selection_orange, Stroke::new(1.0_f32, Color32::WHITE)));
     }
     super::tools::handle_input(app, ui, &resp, rect, ctx);
     super::tools::draw_overlays(app, ui, rect, ctx);

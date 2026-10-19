@@ -156,7 +156,7 @@ impl Snapshot {
     pub fn window_at(&self, x: f64, y: f64, ignore_title_prefix: &str) -> Option<&WindowInfo> {
         self.windows
             .iter()
-            .filter(|w| !w.is_minimized && w.width > 0 && w.height > 0 && !(!ignore_title_prefix.is_empty() && w.title.starts_with(ignore_title_prefix)))
+            .filter(|w| !w.is_minimized && w.width > 0 && w.height > 0 && !(!ignore_title_prefix.is_empty() && w.title.to_lowercase().starts_with(&ignore_title_prefix.to_lowercase())))
             .filter(|w| w.rect().contains(linkshot_core::Pt::new(x, y)))
             .min_by_key(|w| w.z_order)
     }

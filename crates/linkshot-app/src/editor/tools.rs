@@ -17,6 +17,8 @@ pub enum Drag {
     Resize { id: String, handle: Handle, before: Document },
     Marquee { start: Pt },
     Region { start: Pt },
+    /// Dragging one of the eight crop/selection handles (index as drawn in `draw_overlays`).
+    RegionResize { handle: usize, start: linkshot_core::Rect },
     Pen { id: String },
 }
 
@@ -33,6 +35,7 @@ pub struct EffectsState {
     pub border_width: u32,
     pub shadow_size: u32,
     pub shadow_dir: (i32, i32),
+    pub shadow_color: Argb,
     pub edge_type: EdgeType,
     pub edge_size: u32,
     pub edges: [bool; 4],
@@ -71,11 +74,28 @@ impl ToolState {
 
 impl Default for EffectsState {
     fn default() -> Self {
-        Self { current: None, border_color: Argb::BLACK, border_width: 4, shadow_size: 12, shadow_dir: (1, 1), edge_type: EdgeType::Torn, edge_size: 18, edges: [false, true, false, true], filter: FilterType::Grayscale, filter_amount: 50.0, brightness: 0.0, contrast: 0.0, hue: 0.0, saturation: 0.0, gamma: 1.0, replace_from: Argb::WHITE, replace_to: Argb::BLACK, replace_tolerance: 20, scale_percent: 100.0 }
+        Self { current: None, border_color: Argb::BLACK, border_width: 4, shadow_size: 12, shadow_dir: (1, 1), shadow_color: Argb::BLACK, edge_type: EdgeType::Torn, edge_size: 18, edges: [false, true, false, true], filter: FilterType::Grayscale, filter_amount: 50.0, brightness: 0.0, contrast: 0.0, hue: 0.0, saturation: 0.0, gamma: 1.0, replace_from: Argb::WHITE, replace_to: Argb::BLACK, replace_tolerance: 20, scale_percent: 100.0 }
     }
 }
 
 const HANDLE: f32 = 8.0;
+
+/// Crop/selection region handles in document space: corners first, then edge midpoints.
+fn region_handles(r: linkshot_core::Rect) -> [Pt; 8] {
+    let (l, t, rr, b) = (r.min.x, r.min.y, r.max.x, r.max.y);
+    let (cx, cy) = ((l + rr) / 2.0, (t + b) / 2.0);
+    [Pt::new(l, t), Pt::new(rr, t), Pt::new(l, b), Pt::new(rr, b), Pt::new(cx, t), Pt::new(cx, b), Pt::new(l, cy), Pt::new(rr, cy)]
+}
+
+/// Moves the edge(s) owned by handle `i` (see `region_handles`) to `p`.
+fn resize_region(start: linkshot_core::Rect, i: usize, p: Pt) -> linkshot_core::Rect {
+    let (mut l, mut t, mut r, mut b) = (start.min.x, start.min.y, start.max.x, start.max.y);
+    if matches!(i, 0 | 2 | 6) { l = p.x; }
+    if matches!(i, 1 | 3 | 7) { r = p.x; }
+    if matches!(i, 0 | 1 | 4) { t = p.y; }
+    if matches!(i, 2 | 3 | 5) { b = p.y; }
+    linkshot_core::Rect::from_points(Pt::new(l.min(r), t.min(b)), Pt::new(l.max(r), t.max(b))).round_out()
+}
 
 /// Builds a new object from the tool's current properties between two document points.
 pub fn object_from_style(tool: ToolMode, q: &QuickStyle, a: Pt, b: Pt) -> Option<CaptureObject> {
@@ -330,7 +350,17 @@ pub fn handle_input(app: &mut App, ui: &mut egui::Ui, resp: &Response, canvas: R
                     }
                 }
             }
-            ToolMode::Crop | ToolMode::Selection => { app.editor.tools.region = None; app.editor.tools.drag = Some(Drag::Region { start: dp }); }
+            ToolMode::Crop | ToolMode::Selection => {
+                // A press on one of the region's handles resizes it; anywhere else starts a new region.
+                let handle = app.editor.tools.region.and_then(|r| {
+                    let press = ctx.input(|i| i.pointer.press_origin()).unwrap_or_default();
+                    region_handles(r).iter().enumerate().find(|(_, h)| app.editor.canvas.doc_to_screen(**h).distance(press) <= 9.0).map(|(i, _)| i)
+                });
+                match (handle, app.editor.tools.region) {
+                    (Some(handle), Some(start)) => app.editor.tools.drag = Some(Drag::RegionResize { handle, start }),
+                    _ => { app.editor.tools.region = None; app.editor.tools.drag = Some(Drag::Region { start: dp }); }
+                }
+            }
             ToolMode::Pen => {
                 let q = app.editor.current_props();
                 if let Some(mut o) = object_from_style(ToolMode::Pen, &q, dp, dp) {
@@ -410,6 +440,7 @@ pub fn handle_input(app: &mut App, ui: &mut egui::Ui, resp: &Response, canvas: R
                 bump(app);
             }
             Drag::Region { start } => { app.editor.tools.region = Some(linkshot_core::Rect::from_points(*start, p2).round_out()); }
+            Drag::RegionResize { handle, start } => { app.editor.tools.region = Some(resize_region(*start, *handle, p2)); }
             Drag::Marquee { .. } => {}
             Drag::Pen { id } => {
                 let id = id.clone();
@@ -454,7 +485,7 @@ pub fn handle_input(app: &mut App, ui: &mut egui::Ui, resp: &Response, canvas: R
                         if shift { for id in ids { if !app.editor.tools.selection.contains(&id) { app.editor.tools.selection.push(id); } } } else { app.editor.tools.selection = ids; }
                     }
                 }
-                Drag::Region { .. } => { if let Some(r) = app.editor.tools.region { if r.width() < 2.0 || r.height() < 2.0 { app.editor.tools.region = None; } } }
+                Drag::Region { .. } | Drag::RegionResize { .. } => { if let Some(r) = app.editor.tools.region { if r.width() < 2.0 || r.height() < 2.0 { app.editor.tools.region = None; } } }
             }
         }
     }
@@ -573,7 +604,7 @@ pub fn draw_overlays(app: &mut App, ui: &mut egui::Ui, canvas: Rect, ctx: &egui:
             painter.rect_filled(Rect::from_min_max(Pos2::new(img.left(), sr.top()), Pos2::new(sr.left(), sr.bottom())), 0.0, dim);
             painter.rect_filled(Rect::from_min_max(Pos2::new(sr.right(), sr.top()), Pos2::new(img.right(), sr.bottom())), 0.0, dim);
             painter.rect_stroke(sr, 0.0, Stroke::new(1.5_f32, pal.product), egui::StrokeKind::Outside);
-            for p in [sr.left_top(), sr.right_top(), sr.left_bottom(), sr.right_bottom(), sr.center_top(), sr.center_bottom(), sr.left_center(), sr.right_center()] { painter.rect_filled(Rect::from_center_size(p, Vec2::splat(8.0)), 1.0, pal.product); }
+            for p in region_handles(r).map(|h| app.editor.canvas.doc_to_screen(h)) { painter.rect_filled(Rect::from_center_size(p, Vec2::splat(8.0)), 1.0, pal.product); }
             // Crop floaty
             let fr = Rect::from_center_size(Pos2::new(sr.center().x, (sr.bottom() + 28.0).min(canvas.bottom() - 20.0)), Vec2::new(150.0, 30.0));
             painter.rect_filled(fr, 3.0, pal.main_panel);

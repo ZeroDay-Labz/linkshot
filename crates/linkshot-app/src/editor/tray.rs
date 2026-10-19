@@ -113,6 +113,19 @@ pub fn tray_ui(app: &mut App, ui: &mut egui::Ui, rect: Rect, ctx: &egui::Context
 
 pub fn remove_doc(app: &mut App, i: usize, delete_file: bool) {
     if i >= app.editor.docs.len() { return; }
+    if !delete_file && app.editor.docs[i].is_dirty() && !app.editor.docs[i].is_video() {
+        let name = app.editor.docs[i].doc.path.as_ref().map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()).unwrap_or_else(|| "this capture".into());
+        let answer = rfd::MessageDialog::new().set_title("Unsaved changes").set_description(format!("Save changes to {name} before closing?")).set_buttons(rfd::MessageButtons::YesNoCancel).show();
+        match answer {
+            rfd::MessageDialogResult::Yes => {
+                app.editor.current = Some(i);
+                app.editor.save_current(&app.paths, &app.settings);
+                if app.editor.docs.get(i).map(|d| d.is_dirty()).unwrap_or(false) { return; } // save failed or was cancelled
+            }
+            rfd::MessageDialogResult::No => {}
+            _ => return,
+        }
+    }
     if delete_file {
         if let Some(p) = &app.editor.docs[i].doc.path {
             if app.settings.prompt_for_delete {

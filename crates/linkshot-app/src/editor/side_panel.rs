@@ -196,7 +196,7 @@ fn color_row(ui: &mut egui::Ui, label: &str, c: &mut Argb) -> bool {
         ui.label(label);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui.color_edit_button_srgba(&mut col).changed() { *c = color32_to_argb(col); changed = true; }
-            if widgets::transparent_button(ui, &crate::theme::LIGHT).clicked() { *c = Argb::TRANSPARENT; changed = true; }
+            if widgets::transparent_button(ui, if ui.visuals().dark_mode { &crate::theme::DARK } else { &crate::theme::LIGHT }).clicked() { *c = Argb::TRANSPARENT; changed = true; }
         });
     });
     changed
@@ -404,7 +404,7 @@ fn effects_panel(app: &mut App, ui: &mut egui::Ui) {
                     let fx = &mut app.editor.tools.fx;
                     let implemented = match e {
                         EffectType::EffectBorder => { color_row(ui, "Color", &mut fx.border_color); let mut w = fx.border_width as f64; slider_row(ui, "Width", &mut w, 1.0..=100.0, " px"); fx.border_width = w as u32; true }
-                        EffectType::EffectShadow => { let mut s = fx.shadow_size as f64; slider_row(ui, "Size", &mut s, 1.0..=60.0, " px"); fx.shadow_size = s as u32; color_row(ui, "Color", &mut fx.border_color); ui.horizontal(|ui| { ui.label("Position"); for (dx, dy, l) in [(-1, -1, "↖"), (0, -1, "↑"), (1, -1, "↗"), (-1, 0, "←"), (0, 0, "•"), (1, 0, "→"), (-1, 1, "↙"), (0, 1, "↓"), (1, 1, "↘")] { if ui.selectable_label(fx.shadow_dir == (dx, dy), l).clicked() { fx.shadow_dir = (dx, dy); } } }); true }
+                        EffectType::EffectShadow => { let mut s = fx.shadow_size as f64; slider_row(ui, "Size", &mut s, 1.0..=60.0, " px"); fx.shadow_size = s as u32; color_row(ui, "Color", &mut fx.shadow_color); ui.horizontal(|ui| { ui.label("Position"); for (dx, dy, l) in [(-1, -1, "↖"), (0, -1, "↑"), (1, -1, "↗"), (-1, 0, "←"), (0, 0, "•"), (1, 0, "→"), (-1, 1, "↙"), (0, 1, "↓"), (1, 1, "↘")] { if ui.selectable_label(fx.shadow_dir == (dx, dy), l).clicked() { fx.shadow_dir = (dx, dy); } } }); true }
                         EffectType::EffectEdge => { ui.horizontal(|ui| { ui.label("Style"); egui::ComboBox::from_id_salt("edge").selected_text(fx.edge_type.as_str()).show_ui(ui, |ui| { for t in [EdgeType::Torn, EdgeType::Wave, EdgeType::Saw, EdgeType::Sharktooth, EdgeType::Fade] { ui.selectable_value(&mut fx.edge_type, t, t.as_str()); } }); }); let mut s = fx.edge_size as f64; slider_row(ui, "Size", &mut s, 2.0..=80.0, " px"); fx.edge_size = s as u32; ui.horizontal(|ui| { ui.label("Edges"); ui.checkbox(&mut fx.edges[0], "Top"); ui.checkbox(&mut fx.edges[1], "Bottom"); ui.checkbox(&mut fx.edges[2], "Left"); ui.checkbox(&mut fx.edges[3], "Right"); }); true }
                         EffectType::EffectFilter => { ui.horizontal(|ui| { ui.label("Filter"); egui::ComboBox::from_id_salt("filter").selected_text(fx.filter.as_str()).show_ui(ui, |ui| { for f in FilterType::ALL { ui.selectable_value(&mut fx.filter, *f, f.as_str()); } }); }); if matches!(fx.filter, FilterType::Soften | FilterType::Sharpen | FilterType::Opacity | FilterType::Monochrome) { let mut a = fx.filter_amount as f64; slider_row(ui, "Amount", &mut a, 0.0..=100.0, ""); fx.filter_amount = a as f32; } true }
                         EffectType::EffectColorAdjustment => { { let mut d = fx.brightness as f64; slider_row(ui, "Brightness", &mut d, -100.0..=100.0, ""); fx.brightness = d as f32; } { let mut d = fx.contrast as f64; slider_row(ui, "Contrast", &mut d, -100.0..=100.0, ""); fx.contrast = d as f32; } { let mut d = fx.hue as f64; slider_row(ui, "Hue", &mut d, -100.0..=100.0, ""); fx.hue = d as f32; } { let mut d = fx.saturation as f64; slider_row(ui, "Saturation", &mut d, -100.0..=100.0, ""); fx.saturation = d as f32; } let mut g = fx.gamma as f64; slider_row(ui, "Gamma", &mut g, 0.2..=3.0, ""); fx.gamma = g as f32; true }
@@ -430,7 +430,7 @@ fn apply_effect(app: &mut App, e: EffectType, fx: &super::tools::EffectsState) {
     let name = e.label();
     match e {
         EffectType::EffectBorder => super::tools::whole_image_op(app, name, move |img| linkshot_render::effects::border(img, fx.border_color, fx.border_width)),
-        EffectType::EffectShadow => super::tools::whole_image_op(app, name, move |img| linkshot_render::effects::shadow(img, fx.border_color, fx.shadow_size, fx.shadow_dir)),
+        EffectType::EffectShadow => super::tools::whole_image_op(app, name, move |img| linkshot_render::effects::shadow(img, fx.shadow_color, fx.shadow_size, fx.shadow_dir)),
         EffectType::EffectEdge => super::tools::whole_image_op(app, name, move |img| linkshot_render::effects::edge(img, fx.edge_type, fx.edge_size, fx.edges[0], fx.edges[1], fx.edges[2], fx.edges[3])),
         EffectType::EffectFilter => super::tools::whole_image_op(app, name, move |img| match fx.filter {
             FilterType::Grayscale => linkshot_render::effects::grayscale(img),

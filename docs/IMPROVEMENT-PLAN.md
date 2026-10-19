@@ -1,7 +1,7 @@
 # Improvement plan
 
-A prioritised list from a full read-through of the code on 2026-10-18. Line numbers refer to the
-tree at that date. Items marked **done** were fixed in 0.2.0.
+A prioritised list from a full read-through of the code on 2026-10-18, followed by two UI/UX audits
+(capture side and Editor) against the intended behaviour. Items marked **done** were fixed in 0.2.0/0.2.1.
 
 ## Critical
 
@@ -80,3 +80,70 @@ tree at that date. Items marked **done** were fixed in 0.2.0.
 2. Items 10 and 11 before the next package release.
 3. Item 8, the biggest platform gap.
 4. Items 12 to 15, then the structural, test and documentation clean-up.
+
+## UI/UX audit: capture side (2026-10-18)
+
+Fixed in 0.2.1 (**done**): a second trigger during an open overlay re-snapshotted the overlay itself
+(now ignored); the Capture window came back after every capture even when it had been hidden (it
+returns only if it was visible before); a too-small video region left no window open; Schedule had no
+Stop and swallowed bad dates (now Start/Stop, validated, windows hidden only at capture time); interval
+captures forced the Editor to the front every tick; selection handles were decorative (now resizable,
+with cursor feedback); dimension boxes went blank after a window click or Enter; the Effects combo
+listed unimplemented effects; the Share combo offered Print/FTP and could hold one destination (now
+several); the draw-mode hotkey was grabbed system-wide for nothing; Ctrl+Shift+D style letter hotkeys
+without modifiers are refused and Home resets the global key to Print Screen; "Capture Widget" menu
+items toggled nothing (removed); preset Edit now writes back in place (Save / Stop editing in the presets
+bar); Repeat Last Capture is in the File menu and the tray; unimplemented selection modes are no longer
+offered; "Click a window" hint only where windows are known; own windows are ignored case-insensitively;
+XKB names for PageUp/PageDown/Backspace in portal triggers; Webcam / Screen Draw / audio toggles greyed
+out until they work.
+
+Still open:
+- **Capture Cursor** for still images is a no-op: the frozen snapshot is taken without the pointer.
+  Take the snapshot with the cursor (KWin `include-cursor`) when the option is on, or draw a cursor
+  object at the recorded position.
+- **Window selection on Wayland**: `windows()` is empty, so Window mode behaves as Region. A KWin
+  script can list windows and their geometry.
+- **Fullscreen recording on a single monitor** places the toolbar inside the region; Snagit shrinks it
+  to a mini bar. Hide it and rely on the hotkeys / tray, or move it to the tray.
+- **Delay countdown**: no visual countdown while the windows are hidden; add a small bottom-right bubble.
+- `--capture` at launch bypasses delay/schedule settings; fullscreen selection always takes the primary
+  monitor (use the pointer's); scrolling direction keys (H/V/B) and horizontal mode; several preferences
+  are stored but never read (`show_video_guides`, `mic_muted_alert`, `hdr_capture`, `tooltip_mode`,
+  `capture_window_pos`); arrow-key nudge / Shift+Enter / G guides in the overlay.
+- The GlobalShortcuts portal session is re-created on every rebind (see item 10 above).
+
+## UI/UX audit: Editor (2026-10-18)
+
+Fixed in 0.2.1 (**done**): Undo/Redo of raster operations (crop, resize, effects, flatten, fill) showed
+the stale cached bitmap and saved the wrong pixels (renderer cache now invalidated); Image ▸ Resize
+Image… did nothing (opens a dialog); crop/selection handles were decorative (now draggable); closing a
+capture with unsaved changes was silent (Save / Don't save / Cancel); slider and colour-picker gestures
+produced one undo step per frame (merged); Ctrl+T / Ctrl+Shift+F / Ctrl+Shift+B / Ctrl+; were shown
+but not bound, Ctrl+D now duplicates when nothing is selected; Sharpen strength was inverted; the Shadow
+effect used the Border colour; an opened PNG/JPG lost its file identity (Save now writes back to it);
+View ▸ Library showed an empty grid until Refresh; "drop an image here" did nothing (drag-and-drop
+opens files); the empty-state text was invisible on light workspaces; the transparent-colour button used
+the light palette in dark mode; the decorative canvas edge handles are gone until they work; the Stamp,
+Eraser, Magic Wand, Simplify and Cut Out tools say they are not available instead of doing nothing;
+"Share Link" is hidden.
+
+Still open:
+- **Memory**: every edit clones the whole document including PNG blobs (item 6 above).
+- **Whole-image operations flatten all annotations** (Crop, Rotate, Resize, effects, Fill, paste).
+  Crop should translate objects; Fill should keep objects; warn before a destructive flatten.
+- **Property controls that are not rendered**: Text outline/width and underline, Pen "vector /
+  antialias / smooth", Callout tail "Arrow" vs "Triangle" (identical), tail colour/style.
+- **Capture-preset effects ignore their parameters** (hard-coded black 4 px border, 12 px shadow,
+  torn edge). Add per-effect settings in the Capture window.
+- **Save As to PNG/JPG** leaves the original dirty and appends a flattened copy that becomes current.
+- **Object handles**: no rotate handle, one callout tail only, no magnify offset drag; Step size slider
+  does not resize a selected step; no right-click "Edit Value".
+- **Tray**: no Ctrl+click multi-select, Delete/C keys, drag reorder, drag-to-canvas, rename.
+- **Text editing**: the edit box uses the UI font and ignores vertical alignment, so text jumps on
+  commit; a callout's tail vanishes while editing.
+- Canvas edge handles (expand canvas) and the rounded-corner diamond, once implemented.
+- Minor: caption title overlaps window buttons for long names; fixed-width floaties may clip;
+  Ctrl+wheel zoom not anchored under the cursor; torn edge reads as static; Create ▾ items are
+  placeholders; share errors swallowed; dead `tag_popup` / `zoom_popup` state; Favorites delete only
+  searches the current theme; Shift while drawing an arrow constrains to H/V only, not 45°.

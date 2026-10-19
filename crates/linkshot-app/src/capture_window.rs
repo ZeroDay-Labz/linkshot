@@ -99,10 +99,11 @@ impl App {
                             if ui.button("Import Presets...").clicked() { actions.push(Action::ImportPresets); ui.close(); }
                             if ui.button("Export All Presets...").clicked() { actions.push(Action::ExportPresets); ui.close(); }
                             ui.separator();
+                            if ui.button("Repeat Last Capture").clicked() { actions.push(Action::RepeatLastCapture); ui.close(); }
                             if ui.button("Close Capture Window").clicked() { actions.push(Action::HideCaptureWindow); ui.close(); }
                             ui.separator();
                             if ui.button("Capture Preferences...").clicked() { actions.push(Action::ShowPreferences); ui.close(); }
-                            if ui.button("Exit linkshot").clicked() { actions.push(Action::Quit); ui.close(); }
+                            if ui.button("Exit LinkShot").clicked() { actions.push(Action::Quit); ui.close(); }
                         });
                         ui.menu_button("Edit", |ui| {
                             ui.style_mut().visuals.override_text_color = Some(pal.text);
@@ -112,7 +113,6 @@ impl App {
                         ui.menu_button("View", |ui| {
                             ui.style_mut().visuals.override_text_color = Some(pal.text);
                             if ui.button("Share Preferences...").clicked() { actions.push(Action::ShowPreferences); ui.close(); }
-                            if ui.button(if self.settings.capture_interface == linkshot_core::settings::CaptureInterface::CaptureWindowAndWidget { "Hide Capture Widget" } else { "Show Capture Widget" }).clicked() { actions.push(Action::ToggleWidget); ui.close(); }
                             ui.separator();
                             let dark = self.settings.ui_theme == linkshot_core::settings::UiTheme::Dark;
                             if ui.radio(dark, "Dark Theme").clicked() { actions.push(Action::SetTheme(linkshot_core::settings::UiTheme::Dark)); ui.close(); }
@@ -121,7 +121,7 @@ impl App {
                         ui.menu_button("Help", |ui| {
                             ui.style_mut().visuals.override_text_color = Some(pal.text);
                             if ui.button("Tutorials").clicked() { let _ = linkshot_platform::open_url("https://github.com/ZeroDay-Labz/linkshot#readme"); ui.close(); }
-                            if ui.button("Support").clicked() { let _ = linkshot_platform::open_url("https://github.com/"); ui.close(); }
+                            if ui.button("Support").clicked() { let _ = linkshot_platform::open_url("https://github.com/ZeroDay-Labz/linkshot/issues"); ui.close(); }
                             ui.separator();
                             if ui.button("About LinkShot").clicked() { actions.push(Action::ShowAbout); ui.close(); }
                         });
@@ -197,6 +197,11 @@ impl App {
                     if self.capture.presets_expanded { icons::chevron_down(ui.painter(), chev, pal.text); } else { icons::chevron_right(ui.painter(), chev, pal.text); }
                     ui.painter().text(Pos2::new(r.left() + 22.0, r.center().y), Align2::LEFT_CENTER, "Presets", FontId::proportional(13.0), pal.text);
                     if resp.on_hover_text("Show/hide the list of previously saved capture settings.").clicked() { self.capture.presets_expanded = !self.capture.presets_expanded; }
+                    if let Some(id) = self.editing_preset.clone() {
+                        let name = self.presets.presets.iter().find(|p| p.id == id).map(|p| p.effective_name()).unwrap_or_default();
+                        if widgets::flat_button(ui, &pal, &format!("Save to '{name}'"), true).on_hover_text("Write the tab's settings into this preset.").clicked() { actions.push(Action::SavePresetEdits); }
+                        if widgets::flat_button(ui, &pal, "Stop editing", false).clicked() { actions.push(Action::CancelPresetEdit); }
+                    }
                     let add = widgets::dropdown_button(ui, &pal, "+ Add Preset", false, 0.0).on_hover_text("Save capture settings as a new preset.");
                     egui::Popup::menu(&add).show(|ui| {
                         if ui.button("New preset from current settings").clicked() { actions.push(Action::AddPresetFromCurrent); ui.close(); }
@@ -252,7 +257,7 @@ impl App {
         let fill = if editing { pal.input_primary } else if resp.hovered() { pal.control_bright } else { pal.control };
         ui.painter().rect_filled(rect, 11.0, fill);
         ui.painter().rect_stroke(rect, 11.0, Stroke::new(1.0_f32, if editing { pal.product_bright } else { pal.control_outline }), egui::StrokeKind::Inside);
-        let text = if editing { "Press keys…".to_string() } else { current.display() };
+        let text = if editing { if key == "global" { "Press keys… (Home: Print Screen)".to_string() } else { "Press keys…".to_string() } } else { current.display() };
         ui.painter().text(rect.center(), Align2::CENTER_CENTER, text, FontId::proportional(12.0), if current.is_none() && !editing { pal.input_secondary } else { pal.text });
         if resp.clicked() { self.capture.editing_hotkey_for = if editing { None } else { Some(key.to_string()) }; }
         if editing {
@@ -263,9 +268,19 @@ impl App {
                 self.capture.editing_hotkey_for = None;
                 return;
             }
+            if key == "global" && ui.ctx().input(|i| i.key_pressed(egui::Key::Home)) {
+                self.set_hotkey(key, HotKey { key: "PrintScreen".into(), ..Default::default() });
+                self.capture.editing_hotkey_for = None;
+                return;
+            }
             for k in keys {
                 if let Some(name) = crate::hotkeys::egui_key_to_wpf(k) {
-                    if matches!(k, egui::Key::Delete | egui::Key::Backspace | egui::Key::Escape) { continue; }
+                    if matches!(k, egui::Key::Delete | egui::Key::Backspace | egui::Key::Escape | egui::Key::Home) { continue; }
+                    let plain = name.len() == 1 || (name.len() == 2 && name.starts_with('D'));
+                    if plain && !(mods.ctrl || mods.alt || mods.command) {
+                        self.set_status("Add Ctrl, Alt or the Super key: a bare letter or digit would block typing everywhere.");
+                        continue;
+                    }
                     let hk = HotKey { key: name.into(), ctrl: mods.ctrl, alt: mods.alt, shift: mods.shift, win: mods.command && !mods.ctrl };
                     self.set_hotkey(key, hk);
                     self.capture.editing_hotkey_for = None;
@@ -376,11 +391,14 @@ impl App {
         crate::widgets::popup(&resp, false, egui::PopupCloseBehavior::CloseOnClick, |ui| {
             ui.set_min_width(width);
             if ui.selectable_label(ids == vec![output_ids::NONE.to_string()], "None").clicked() { pick = Some(output_ids::NONE.into()); }
-            for id in &enabled { if ui.selectable_label(ids.contains(id), output_ids::title(id)).clicked() { pick = Some(id.clone()); } }
+            // Print and FTP are not implemented; several destinations may be ticked at once.
+            for id in enabled.iter().filter(|id| id.as_str() != output_ids::PRINT && id.as_str() != output_ids::FTP) { if ui.selectable_label(ids.contains(id), output_ids::title(id)).clicked() { pick = Some(id.clone()); } }
         });
         if let Some(id) = pick {
             let s = self.presets.selected_mut();
-            if id == output_ids::NONE { s.share_destination_ids = vec![id]; } else { s.share_destination_ids = vec![id]; }
+            if id == output_ids::NONE { s.share_destination_ids = vec![id]; }
+            else if let Some(pos) = s.share_destination_ids.iter().position(|x| *x == id) { s.share_destination_ids.remove(pos); if s.share_destination_ids.is_empty() { s.share_destination_ids.push(output_ids::NONE.into()); } }
+            else { s.share_destination_ids.retain(|x| x != output_ids::NONE); s.share_destination_ids.push(id); }
             if s.auto_generate_name { s.display_name = s.generate_name(); }
             self.mark_presets_dirty();
         }
@@ -391,21 +409,23 @@ impl App {
         let current: Vec<EffectType> = self.presets.selected().capture_effects.iter().map(|e| e.effect_type).filter(|e| *e != EffectType::EffectNone).collect();
         let label = if current.is_empty() { "None".to_string() } else { current.iter().map(|e| e.label()).collect::<Vec<_>>().join(", ") };
         let resp = widgets::combo_header(ui, &pal, &label, width);
-        let mut pick: Option<EffectType> = None;
+        enum Pick { Clear, Remove, Toggle(EffectType) }
+        let mut pick: Option<Pick> = None;
         crate::widgets::popup(&resp, false, egui::PopupCloseBehavior::CloseOnClick, |ui| {
             ui.set_min_width(width);
-            if ui.selectable_label(current.is_empty(), "None").clicked() { pick = Some(EffectType::EffectNone); }
-            for e in [EffectType::EffectBorder, EffectType::EffectEdge, EffectType::EffectCaption, EffectType::EffectShadow, EffectType::EffectPerspectiveShear, EffectType::EffectPageCurl, EffectType::EffectFilter, EffectType::EffectColorAdjustment, EffectType::EffectColorReplacement, EffectType::EffectWatermark, EffectType::EffectScale, EffectType::EffectTrim] {
-                if ui.selectable_label(current.contains(&e), e.label()).clicked() { pick = Some(e); }
+            if ui.selectable_label(current.is_empty(), "None").clicked() { pick = Some(Pick::Clear); }
+            // Only effects the capture pipeline applies (see `EditorState::apply_capture_effect`).
+            for e in [EffectType::EffectBorder, EffectType::EffectEdge, EffectType::EffectShadow, EffectType::EffectFilter, EffectType::EffectTrim] {
+                if ui.selectable_label(current.contains(&e), e.label()).clicked() { pick = Some(Pick::Toggle(e)); }
             }
-            if !current.is_empty() { ui.separator(); if ui.button("Remove this effect").clicked() { pick = Some(EffectType::EffectImageResolution); } }
+            if !current.is_empty() { ui.separator(); if ui.button("Remove last effect").clicked() { pick = Some(Pick::Remove); } }
         });
-        if let Some(e) = pick {
+        if let Some(pick) = pick {
             let s = self.presets.selected_mut();
-            match e {
-                EffectType::EffectNone => s.capture_effects.clear(),
-                EffectType::EffectImageResolution => { s.capture_effects.pop(); }
-                e => { if let Some(pos) = s.capture_effects.iter().position(|x| x.effect_type == e) { s.capture_effects.remove(pos); } else { s.capture_effects.push(linkshot_core::presets::EffectSettings { effect_type: e, params: Default::default() }); } }
+            match pick {
+                Pick::Clear => s.capture_effects.clear(),
+                Pick::Remove => { s.capture_effects.pop(); }
+                Pick::Toggle(e) => { if let Some(pos) = s.capture_effects.iter().position(|x| x.effect_type == e) { s.capture_effects.remove(pos); } else { s.capture_effects.push(linkshot_core::presets::EffectSettings { effect_type: e, params: Default::default() }); } }
             }
             if s.auto_generate_name { s.display_name = s.generate_name(); }
             self.mark_presets_dirty();
@@ -506,17 +526,13 @@ impl App {
                 ui.label(egui::RichText::new("Share:").color(pal.text));
                 self.share_combo(ui, 164.0);
                 ui.end_row();
-                let mut changed = false;
-                let s = self.presets.selected_mut();
-                ui.label(egui::RichText::new("Webcam:").color(pal.text));
-                let l1 = if s.enable_webcam { "On" } else { "Off" };
-                changed |= widgets::toggle(ui, &pal, &mut s.enable_webcam, l1).changed();
+                // Webcam and Screen Draw are not recorded yet: shown greyed out so nobody expects them.
+                ui.label(egui::RichText::new("Webcam:").color(pal.input_secondary));
+                ui.add_enabled_ui(false, |ui| { let mut off = false; widgets::toggle(ui, &pal, &mut off, "Not yet available"); });
                 ui.end_row();
-                ui.label(egui::RichText::new("Screen Draw:").color(pal.text));
-                let l2 = if s.screen_draw_starts_on { "On" } else { "Off" };
-                changed |= widgets::toggle(ui, &pal, &mut s.screen_draw_starts_on, l2).changed();
+                ui.label(egui::RichText::new("Screen Draw:").color(pal.input_secondary));
+                ui.add_enabled_ui(false, |ui| { let mut off = false; widgets::toggle(ui, &pal, &mut off, "Not yet available"); });
                 ui.end_row();
-                if changed { self.mark_presets_dirty(); }
             });
             ui.add_space(12.0);
             ui.vertical(|ui| {
@@ -525,8 +541,11 @@ impl App {
                 let s = self.presets.selected_mut();
                 changed |= widgets::toggle(ui, &pal, &mut s.preview_in_editor, "Preview in Editor").changed();
                 changed |= widgets::toggle(ui, &pal, &mut s.capture_cursor, "Capture Cursor").changed();
-                changed |= widgets::toggle(ui, &pal, &mut s.enable_microphone, "Record Microphone").changed();
-                changed |= widgets::toggle(ui, &pal, &mut s.enable_system_audio, "Record System Audio").changed();
+                ui.add_enabled_ui(false, |ui| {
+                    let mut off = false;
+                    widgets::toggle(ui, &pal, &mut off, "Record Microphone");
+                    widgets::toggle(ui, &pal, &mut off, "Record System Audio");
+                });
                 if changed { self.mark_presets_dirty(); }
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new("Save as:").color(pal.text));
@@ -535,7 +554,7 @@ impl App {
                     let b = ui.radio_value(&mut gif, false, "MP4").changed();
                     if a || b { self.settings.default_video_format = if gif { "GIF".into() } else { "MP4".into() }; self.mark_settings_dirty(); }
                 });
-                ui.label(egui::RichText::new(format!("{} fps · Shift+F9 pause · Shift+F10 stop · audio not yet recorded", self.settings.video_quality.fps())).small().color(pal.input_secondary));
+                ui.label(egui::RichText::new(format!("{} fps · Shift+F9 pause · Shift+F10 stop · audio, webcam and screen draw not yet available", self.settings.video_quality.fps())).small().color(pal.input_secondary));
             });
         });
     }

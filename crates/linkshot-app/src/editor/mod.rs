@@ -35,16 +35,24 @@ pub struct OpenDoc {
     pub changed_at: Instant,
     /// Set for GIF/MP4 documents: the player and export source (`doc` holds the poster frame).
     pub video: Option<video_view::VideoDoc>,
+    /// Name and time of the last edit, so a slider gesture collapses into one undo step.
+    pub last_edit: Option<(String, Instant)>,
 }
 
 impl OpenDoc {
     pub fn new(doc: Document) -> Self {
-        Self { doc, version: 1, saved_version: 0, undo: UndoStack::default(), thumb: None, thumb_version: 0, pinned: false, kind: TrayItemType::Image, opened: Instant::now(), changed_at: Instant::now(), video: None }
+        Self { doc, version: 1, saved_version: 0, undo: UndoStack::default(), thumb: None, thumb_version: 0, pinned: false, kind: TrayItemType::Image, opened: Instant::now(), changed_at: Instant::now(), video: None, last_edit: None }
     }
     pub fn is_dirty(&self) -> bool { self.version != self.saved_version }
     pub fn is_video(&self) -> bool { self.video.is_some() }
     /// Applies a document edit as an undoable step.
     pub fn edit(&mut self, name: &str, f: impl FnOnce(&mut Document)) {
+        // Property sliders and colour pickers call this every frame; consecutive edits of the same
+        // kind within a short time are merged into one undo step (they set absolute values).
+        let coalesce = matches!(name, "Change Style" | "Canvas Color" | "Change Effect")
+            && self.last_edit.as_ref().map(|(n, t)| n == name && t.elapsed() < std::time::Duration::from_millis(800)).unwrap_or(false);
+        if coalesce { self.undo.undo(&mut self.doc); self.undo.clear_redo(); }
+        self.last_edit = Some((name.to_string(), Instant::now()));
         let before = self.doc.clone();
         let mut after = self.doc.clone();
         f(&mut after);
@@ -124,7 +132,12 @@ impl EditorState {
             props,
             themes: themes.to_vec(),
             current_theme,
-            toolbar: if settings.toolbar.is_empty() { ToolBarItem::default_toolbar() } else { settings.toolbar.clone() },
+            toolbar: {
+                // Saved toolbars from before 0.2.1 carry the not-yet-available Stamp tool; swap it for Step.
+                let mut tb = if settings.toolbar.is_empty() { ToolBarItem::default_toolbar() } else { settings.toolbar.clone() };
+                for i in tb.iter_mut() { if i.item_type == ToolBarItemType::Tool && i.tool_mode == ToolMode::Stamp { i.tool_mode = ToolMode::Step; } }
+                tb
+            },
             more_tool: None,
             renderer: Renderer::new(),
             canvas: canvas::CanvasState::default(),
@@ -373,8 +386,26 @@ impl EditorState {
         self.props.get(&self.tool).cloned().unwrap_or_else(|| QuickStyle::for_tool(self.tool))
     }
 
+    /// Undo on the current document; the renderer caches the background by blob name, so a raster
+    /// undo (crop, resize, effect) needs the cache dropped to show the restored pixels.
+    pub fn undo_current(&mut self) {
+        if let Some(d) = self.current_doc_mut() { d.undo(); d.last_edit = None; }
+        self.renderer.invalidate();
+        self.canvas.invalidate();
+        self.tools.clear_selection();
+    }
+    pub fn redo_current(&mut self) {
+        if let Some(d) = self.current_doc_mut() { d.redo(); d.last_edit = None; }
+        self.renderer.invalidate();
+        self.canvas.invalidate();
+    }
+
     pub fn select_tool(&mut self, t: ToolMode) {
         if t == ToolMode::Favorites || t == ToolMode::None { self.tool = t; return; }
+        if matches!(t, ToolMode::Stamp | ToolMode::Eraser | ToolMode::MagicWand | ToolMode::SimplifiedUI | ToolMode::CutOut) {
+            self.set_status(format!("{} is not available yet", t.label()));
+            return;
+        }
         if self.tool != t { self.last_tool = self.tool; }
         self.tool = t;
         self.tools.on_tool_changed();
@@ -392,6 +423,11 @@ pub fn editor_ui(app: &mut App, ctx: &egui::Context, actions: &mut Vec<Action>) 
     let pal = app.pal;
     // Keyboard shortcuts
     handle_shortcuts(app, ctx, actions);
+    // Files dropped on the window open as new documents.
+    let dropped: Vec<std::path::PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect());
+    for path in dropped {
+        match crate::share::open_file(&path) { Ok(doc) => app.editor.add_document(ctx, doc, &app.paths, &app.settings), Err(e) => app.editor.set_status(format!("Could not open {}: {e:#}", path.display())) }
+    }
 
     egui::CentralPanel::default().frame(egui::Frame::NONE.fill(pal.main_panel)).show(ctx, |ui| {
         let full = ui.max_rect();
@@ -488,8 +524,8 @@ fn handle_shortcuts(app: &mut App, ctx: &egui::Context, actions: &mut Vec<Action
     if ctx.memory(|m| m.focused().is_some()) { return; }
     let (ctrl, shift, alt) = ctx.input(|i| (i.modifiers.command, i.modifiers.shift, i.modifiers.alt));
     let pressed = |k: egui::Key| ctx.input(|i| i.key_pressed(k));
-    if ctrl && !shift && pressed(egui::Key::Z) { if let Some(d) = app.editor.current_doc_mut() { d.undo(); } app.editor.tools.clear_selection(); }
-    if ctrl && (pressed(egui::Key::Y) || (shift && pressed(egui::Key::Z))) { if let Some(d) = app.editor.current_doc_mut() { d.redo(); } }
+    if ctrl && !shift && pressed(egui::Key::Z) { app.editor.undo_current(); }
+    if ctrl && (pressed(egui::Key::Y) || (shift && pressed(egui::Key::Z))) { app.editor.redo_current(); }
     if ctrl && !shift && pressed(egui::Key::S) { app.editor.save_current(&app.paths, &app.settings); }
     if ctrl && shift && pressed(egui::Key::S) { save_as_current(app); }
     if ctrl && pressed(egui::Key::O) { if let Some(paths) = crate::share::open_dialog(None) { for p in paths { if let Ok(doc) = crate::share::open_file(&p) { app.editor.add_document(ctx, doc, &app.paths, &app.settings); } } } }
@@ -501,7 +537,15 @@ fn handle_shortcuts(app: &mut App, ctx: &egui::Context, actions: &mut Vec<Action
     if ctrl && (pressed(egui::Key::Plus) || pressed(egui::Key::Equals)) { app.editor.canvas.zoom_step(1); }
     if ctrl && pressed(egui::Key::Minus) { app.editor.canvas.zoom_step(-1); }
     if ctrl && pressed(egui::Key::A) { if let Some(d) = app.editor.current_doc() { app.editor.tools.selection = d.doc.page().capture_objects.iter().map(|o| o.object_id.clone()).collect(); } }
-    if ctrl && pressed(egui::Key::D) { app.editor.tools.clear_selection(); }
+    if ctrl && pressed(egui::Key::D) {
+        // Ctrl+D: Deselect when something is selected, otherwise Duplicate the capture (as in the menus).
+        if !app.editor.tools.selection.is_empty() { app.editor.tools.clear_selection(); }
+        else if let Some(d) = app.editor.current_doc() { let mut doc = d.doc.clone(); doc.path = None; app.editor.add_document(ctx, doc, &app.paths, &app.settings); }
+    }
+    if ctrl && !shift && pressed(egui::Key::T) { tools::flatten_selection(app); }
+    if ctrl && shift && pressed(egui::Key::F) { tools::reorder(app, 1); }
+    if ctrl && shift && pressed(egui::Key::B) { tools::reorder(app, -1); }
+    if ctrl && pressed(egui::Key::Semicolon) { app.settings.canvas_snapping = !app.settings.canvas_snapping; app.mark_settings_dirty(); }
     if ctrl && shift && pressed(egui::Key::P) { if let Some(d) = app.editor.current_doc_mut() { d.pinned = !d.pinned; app.editor.tray_dirty = true; } }
     if ctrl && shift && pressed(egui::Key::X) { actions.push(Action::ToggleCaptureWindow); }
     if ctrl && pressed(egui::Key::W) { tray::close_current(app); }
@@ -609,8 +653,8 @@ fn editor_menu(app: &mut App, ui: &mut egui::Ui, ctx: &egui::Context, actions: &
     });
     ui.menu_button("Edit", |ui| {
         let (cu, cr) = app.editor.current_doc().map(|d| (d.undo.can_undo(), d.undo.can_redo())).unwrap_or((false, false));
-        if ui.add_enabled(cu, egui::Button::new("Undo\tCtrl+Z")).clicked() { if let Some(d) = app.editor.current_doc_mut() { d.undo(); } ui.close(); }
-        if ui.add_enabled(cr, egui::Button::new("Redo\tCtrl+Y")).clicked() { if let Some(d) = app.editor.current_doc_mut() { d.redo(); } ui.close(); }
+        if ui.add_enabled(cu, egui::Button::new("Undo\tCtrl+Z")).clicked() { app.editor.undo_current(); ui.close(); }
+        if ui.add_enabled(cr, egui::Button::new("Redo\tCtrl+Y")).clicked() { app.editor.redo_current(); ui.close(); }
         if ui.add_enabled(cu, egui::Button::new("Undo All")).clicked() { if let Some(d) = app.editor.current_doc_mut() { let mut doc = d.doc.clone(); d.undo.undo_all(&mut doc); d.doc = doc; d.version += 1; } ui.close(); }
         ui.separator();
         if ui.button("Copy All\tCtrl+Shift+C").clicked() { if let Some(d) = app.editor.current_doc() { let doc = d.doc.clone(); let _ = crate::share::copy_all(&mut app.editor.renderer, &doc); } ui.close(); }
@@ -639,7 +683,10 @@ fn editor_menu(app: &mut App, ui: &mut egui::Ui, ctx: &egui::Context, actions: &
         if ui.button("Flatten All\tCtrl+Shift+T").clicked() { flatten_current(app); ui.close(); }
         ui.separator();
         if ui.button("Auto Trim").clicked() { tools::whole_image_op(app, "Auto Trim", |img| linkshot_render::effects::auto_trim(img, 8)); ui.close(); }
-        if ui.button("Resize Image...").clicked() { app.editor.size_popup = true; ui.close(); }
+        if ui.button("Resize Image...").clicked() {
+            if let Some((w, h)) = app.editor.current_doc().map(|d| (d.doc.page().capture_canvas_width as i64, d.doc.page().capture_canvas_height as i64)) { app.editor.resize_w = w.to_string(); app.editor.resize_h = h.to_string(); }
+            app.editor.size_popup = true; ui.close();
+        }
         ui.menu_button("Rotate", |ui| {
             if ui.button("Rotate Clockwise").clicked() { tools::whole_image_op(app, "Rotate", |img| linkshot_render::effects::rotate(img, 90)); ui.close(); }
             if ui.button("Rotate Counterclockwise").clicked() { tools::whole_image_op(app, "Rotate", |img| linkshot_render::effects::rotate(img, 270)); ui.close(); }
@@ -712,7 +759,10 @@ fn editor_menu(app: &mut App, ui: &mut egui::Ui, ctx: &egui::Context, actions: &
         if ui.checkbox(&mut app.editor.side_panel_visible, "Side Bar").changed() { app.settings.side_panel_visible = app.editor.side_panel_visible; app.mark_settings_dirty(); }
         ui.separator();
         if ui.button("Details\tAlt+Enter").clicked() { let s = doc_details(app); app.editor.set_status(s); ui.close(); }
-        if ui.checkbox(&mut app.editor.library_view, "Library").changed() { ui.close(); }
+        if ui.checkbox(&mut app.editor.library_view, "Library").changed() {
+            if app.editor.library_view && !app.editor.library_scanned { let dir = app.settings.library_dir(&app.paths); let _ = app.editor.library.scan(&dir); app.editor.library_scanned = true; }
+            ui.close();
+        }
         if ui.checkbox(&mut app.editor.tray_visible, "Recent Captures").changed() { app.settings.tray_visible = app.editor.tray_visible; app.mark_settings_dirty(); }
     });
     ui.menu_button("Help", |ui| {
@@ -768,7 +818,7 @@ fn top_panel(app: &mut App, ui: &mut egui::Ui, rect: Rect, actions: &mut Vec<Act
                     }
                 }
             });
-            if widgets::flat_button(ui, &pal, "Share Link", true).on_hover_text("Share Link (Ctrl+Shift+L)\nGet a shareable link to your capture.").clicked() { app.editor.set_status("Share Link requires a cloud account; not available in this build."); }
+            // "Share Link" (cloud upload) is not part of this build; the button would only disappoint.
             let copy = ui.add(egui::Button::new(egui::RichText::new("⧉  Copy All").color(pal.text_bright)).fill(pal.control).stroke(Stroke::new(1.0_f32, pal.control_outline)));
             if copy.on_hover_text("Copy the image to the clipboard (Ctrl+Shift+C)").clicked() { if let Some(d) = app.editor.current_doc() { let doc = d.doc.clone(); match crate::share::copy_all(&mut app.editor.renderer, &doc) { Ok(()) => app.editor.set_status("Copied"), Err(e) => app.editor.set_status(format!("Copy failed: {e}")) } } }
         });
@@ -839,8 +889,8 @@ fn toolbar_ui(app: &mut App, ui: &mut egui::Ui, rect: Rect) {
                 if labels { ui.painter().text(Pos2::new(r.center().x, r.bottom() - 10.0), Align2::CENTER_CENTER, item.command_id.as_str(), FontId::proportional(11.0), c); }
                 if resp.clicked() && enabled {
                     match item.command_id {
-                        ToolBarCommandType::Undo => { if let Some(d) = app.editor.current_doc_mut() { d.undo(); } app.editor.tools.clear_selection(); }
-                        ToolBarCommandType::Redo => { if let Some(d) = app.editor.current_doc_mut() { d.redo(); } }
+                        ToolBarCommandType::Undo => app.editor.undo_current(),
+                        ToolBarCommandType::Redo => app.editor.redo_current(),
                         ToolBarCommandType::Save => app.editor.save_current(&app.paths, &app.settings),
                         ToolBarCommandType::FlattenAll => flatten_current(app),
                         ToolBarCommandType::DeleteObject => tools::delete_selection(app),
@@ -966,6 +1016,7 @@ fn resize_popup(app: &mut App, ui: &mut egui::Ui) {
             if let (Ok(w), Ok(h)) = (app.editor.resize_w.trim().parse::<u32>(), app.editor.resize_h.trim().parse::<u32>()) {
                 if w > 0 && h > 0 && w <= 25000 && h <= 25000 {
                     tools::whole_image_op(app, "Resize Image", move |img| linkshot_render::effects::scale(img, w, h, true));
+                    app.editor.size_popup = false;
                 }
             }
             ui.close();
@@ -1081,6 +1132,11 @@ fn dialogs(app: &mut App, ctx: &egui::Context, actions: &mut Vec<Action>) {
             ui.horizontal(|ui| { ui.label("Color"); if ui.color_edit_button_srgba(&mut c).changed() { if let Some(d) = app.editor.current_doc_mut() { let a = crate::theme::color32_to_argb(c); d.edit("Canvas Color", move |doc| doc.page_mut().capture_background_color = a); } } });
             ui.horizontal(|ui| { if ui.button("Transparent").clicked() { if let Some(d) = app.editor.current_doc_mut() { d.edit("Canvas Color", |doc| doc.page_mut().capture_background_color = linkshot_core::Argb::TRANSPARENT); } } if ui.button("Close").clicked() { app.editor.canvas_color_dialog = false; } });
         });
+    }
+    if app.editor.size_popup {
+        let mut open = true;
+        egui::Window::new("Resize Image").collapsible(false).resizable(false).open(&mut open).anchor(Align2::CENTER_CENTER, [0.0, 0.0]).show(ctx, |ui| { resize_popup(app, ui); });
+        if !open || app.editor.current.is_none() { app.editor.size_popup = false; }
     }
     if app.show_about {
         egui::Window::new("About LinkShot").collapsible(false).resizable(false).show(ctx, |ui| {

@@ -67,8 +67,10 @@ pub fn soften(img: &RgbaImage, amount: f32) -> RgbaImage {
     crate::pixmap_to_image(&pm)
 }
 
+/// `amount` ≥ 0: strength of the unsharp mask (sigma); 0 leaves the image untouched.
 pub fn sharpen(img: &RgbaImage, amount: f32) -> RgbaImage {
-    image::imageops::unsharpen(img, 1.0, (amount * 2.0) as i32)
+    if amount <= 0.0 { return img.clone(); }
+    image::imageops::unsharpen(img, (amount * 1.5).clamp(0.3, 12.0), 0)
 }
 
 /// Brightness/contrast/hue/saturation/gamma adjustment (all around neutral = 0 / 1.0).

@@ -43,6 +43,8 @@ impl<T> UndoStack<T> {
     pub fn undo_name(&self) -> Option<&str> { self.done.last().map(|c| c.name()) }
     pub fn redo_name(&self) -> Option<&str> { self.undone.last().map(|c| c.name()) }
     pub fn clear(&mut self) { self.done.clear(); self.undone.clear(); }
+    /// Forgets the redo history (after undoing a step that is about to be re-applied in merged form).
+    pub fn clear_redo(&mut self) { self.undone.clear(); }
     pub fn len(&self) -> usize { self.done.len() }
     pub fn is_empty(&self) -> bool { self.done.is_empty() }
     pub fn names(&self) -> Vec<&str> { self.done.iter().map(|c| c.name()).collect() }

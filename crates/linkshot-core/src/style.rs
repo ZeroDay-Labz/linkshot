@@ -350,7 +350,7 @@ impl ToolBarItem {
     pub fn default_toolbar() -> Vec<ToolBarItem> {
         vec![
             Self::spacer(), Self::tool(ToolMode::Favorites), Self::tool(ToolMode::Arrow), Self::tool(ToolMode::Text),
-            Self::tool(ToolMode::Callouts), Self::tool(ToolMode::Shape), Self::tool(ToolMode::Stamp), Self::tool(ToolMode::Fill),
+            Self::tool(ToolMode::Callouts), Self::tool(ToolMode::Shape), Self::tool(ToolMode::Step), Self::tool(ToolMode::Fill),
             Self::tool(ToolMode::VectorSelection), Self::more(), Self::command(ToolBarCommandType::Undo),
             Self::command(ToolBarCommandType::Redo), Self::spacer(),
         ]

@@ -119,6 +119,8 @@ pub fn open_file(path: &Path) -> Result<Document> {
     let img = image::open(path).with_context(|| format!("open {}", path.display()))?.to_rgba8();
     let png = linkshot_render::encode_png(&img)?;
     let mut doc = Document::from_png(img.width(), img.height(), png);
+    // Keep the file identity: the title shows the file name and Save writes back to it.
+    doc.path = Some(path.to_path_buf());
     doc.metadata.extra.insert("SourceFile".into(), serde_json::Value::String(path.to_string_lossy().into_owned()));
     Ok(doc)
 }

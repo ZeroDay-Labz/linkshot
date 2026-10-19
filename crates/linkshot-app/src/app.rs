@@ -30,12 +30,14 @@ pub enum Action {
     ToggleCaptureWindow,
     ShowPreferences,
     ShowAbout,
-    ToggleWidget,
     SetTheme(linkshot_core::settings::UiTheme),
     ResetCurrentSettings,
     AddPresetFromCurrent,
     AddPresetNew,
     EditPreset(String),
+    /// Write the tab's settings back into the preset being edited.
+    SavePresetEdits,
+    CancelPresetEdit,
     DuplicatePreset(String),
     DeletePreset(String),
     ExportPreset(String),
@@ -47,6 +49,8 @@ pub enum Action {
 struct PendingCapture {
     settings: CaptureSettings,
     due: Instant,
+    /// The windows have been hidden for the capture (`hide_linkshot_during_capture`).
+    hidden: bool,
 }
 
 /// Viewport id of the Capture window (a child of the invisible root, see `keepalive.rs`).
@@ -82,6 +86,10 @@ pub struct App {
     pub show_about: bool,
     /// First-run question: make LinkShot the system's screenshot tool (Print Screen).
     pub show_default_prompt: bool,
+    /// Was the Capture window visible when the current capture started? Only then does it come back.
+    pub capture_was_visible: bool,
+    /// Preset being edited in place through the tab (Edit in the preset menu).
+    pub editing_preset: Option<String>,
     pub status: Option<(String, Instant)>,
     interval_timer: Option<(CaptureSettings, Instant, Option<image::RgbaImage>)>,
 }
@@ -92,7 +100,7 @@ impl App {
         if capture_now {
             let settings = app.presets.selected().clone();
             app.last_capture = Some(settings.clone());
-            app.pending = Some(PendingCapture { settings, due: Instant::now() + Duration::from_millis(400) });
+            app.pending = Some(PendingCapture { settings, due: Instant::now() + Duration::from_millis(50), hidden: false });
         }
         app
     }
@@ -154,6 +162,8 @@ impl App {
             show_prefs: false,
             show_about: false,
             show_default_prompt: false,
+            capture_was_visible: false,
+            editing_preset: None,
             status: None,
             interval_timer: None,
         };
@@ -228,7 +238,6 @@ impl App {
             (self.settings.hotkey_repeat_last.clone(), HotkeyEvent::RepeatLast),
             (self.settings.hotkey_video_start_pause.clone(), HotkeyEvent::VideoStartPause),
             (self.settings.hotkey_video_stop.clone(), HotkeyEvent::VideoStop),
-            (self.settings.hotkey_draw_mode.clone(), HotkeyEvent::DrawMode),
         ];
         for p in &self.presets.presets { b.push((p.hot_key.clone(), HotkeyEvent::Preset(p.id.clone()))); }
         // When the desktop itself launches `linkshot --capture` on Print Screen, claiming the key here too
@@ -270,10 +279,6 @@ impl App {
                 self.mark_settings_dirty();
                 self.apply_theme(ctx);
             }
-            Action::ToggleWidget => {
-                self.settings.capture_interface = if self.settings.capture_interface == linkshot_core::settings::CaptureInterface::CaptureWindow { linkshot_core::settings::CaptureInterface::CaptureWindowAndWidget } else { linkshot_core::settings::CaptureInterface::CaptureWindow };
-                self.mark_settings_dirty();
-            }
             Action::ResetCurrentSettings => {
                 let mode = self.presets.selected_mode;
                 let fresh = SavedPresets::default();
@@ -304,14 +309,29 @@ impl App {
                 self.mark_presets_dirty();
             }
             Action::EditPreset(id) => {
-                // Load the preset into its tab for editing.
+                // Load the preset into its tab; the presets bar offers Save / Stop editing while it is loaded.
                 if let Some(p) = self.presets.presets.iter().find(|p| p.id == id).cloned() {
                     self.presets.selected_mode = p.capture_mode;
-                    *self.presets.selected_mut() = CaptureSettings { id: self.presets.selected().id.clone(), ..p };
-                    self.set_status("Preset loaded into the tab; use 'Add Preset' to save changes as a new preset.");
+                    *self.presets.selected_mut() = CaptureSettings { id: self.presets.selected().id.clone(), ..p.clone() };
+                    self.editing_preset = Some(id);
+                    self.set_status(format!("Editing preset '{}': change the tab, then press Save in the presets bar.", p.effective_name()));
                     self.mark_presets_dirty();
                 }
             }
+            Action::SavePresetEdits => {
+                if let Some(id) = self.editing_preset.take() {
+                    let tab = self.presets.selected().clone();
+                    if let Some(p) = self.presets.presets.iter_mut().find(|p| p.id == id) {
+                        let keep = (p.id.clone(), p.hot_key.clone(), p.display_name.clone(), p.auto_generate_name, p.is_default);
+                        *p = CaptureSettings { id: keep.0, hot_key: keep.1, display_name: keep.2, auto_generate_name: keep.3, is_default: keep.4, ..tab };
+                        if p.auto_generate_name { p.display_name = p.generate_name(); }
+                        let name = p.effective_name();
+                        self.set_status(format!("Preset '{name}' saved."));
+                        self.mark_presets_dirty();
+                    }
+                }
+            }
+            Action::CancelPresetEdit => { self.editing_preset = None; self.set_status("Stopped editing the preset (the tab keeps its settings)."); }
             Action::DuplicatePreset(id) => {
                 if let Some(p) = self.presets.presets.iter().find(|p| p.id == id).cloned() {
                     let mut d = p.clone();
@@ -373,32 +393,64 @@ impl App {
             self.set_status("Interval capture started.");
             return;
         }
-        let mut delay = Duration::from_millis(if self.settings.hide_linkshot_during_capture { 350 } else { 50 });
+        // Schedule: the button reads Start/Stop like Interval.
+        if settings.time_delay && settings.timed_capture_type == TimedCaptureType::Schedule && self.pending.is_some() && self.capture_toggled {
+            self.pending = None; self.capture_toggled = false; self.set_status("Scheduled capture cancelled."); return;
+        }
+        // One capture at a time: a second trigger while the overlay is up would snapshot the overlay itself.
+        if self.overlay.is_some() || self.pending.is_some() || self.scrolling.is_some() || self.recording.is_some() {
+            self.set_status("A capture is already in progress.");
+            return;
+        }
+        let mut delay = Duration::from_millis(50);
+        let mut schedule = false;
         if settings.time_delay && settings.timed_capture_type == TimedCaptureType::Delay {
             delay += Duration::from_secs(settings.delay_duration.max(1) as u64);
         }
         if settings.time_delay && settings.timed_capture_type == TimedCaptureType::Schedule {
-            if let Ok(t) = chrono::NaiveDateTime::parse_from_str(settings.scheduled_capture_time.trim(), "%Y-%m-%d %H:%M") {
-                let now = chrono::Local::now().naive_local();
-                if t > now { delay += (t - now).to_std().unwrap_or_default(); }
+            match chrono::NaiveDateTime::parse_from_str(settings.scheduled_capture_time.trim(), "%Y-%m-%d %H:%M") {
+                Err(_) => { self.set_status("Scheduled time must look like 2026-10-18 14:30 (set it in the Time Delay options)."); return; }
+                Ok(t) => {
+                    let now = chrono::Local::now().naive_local();
+                    if t <= now { self.set_status("The scheduled time is in the past."); return; }
+                    delay += (t - now).to_std().unwrap_or_default();
+                    schedule = true;
+                    self.capture_toggled = true;
+                    self.set_status(format!("Capture scheduled for {} (press Stop to cancel).", t.format("%Y-%m-%d %H:%M")));
+                }
             }
         }
-        if self.settings.hide_linkshot_during_capture {
+        self.capture_was_visible = self.capture_visible;
+        let mut hidden = false;
+        if self.settings.hide_linkshot_during_capture && !schedule {
             // Not showing the viewports closes their windows (works on Wayland too, unlike
             // set_visible); `restore_windows` brings the Capture window back afterwards.
             self.capture_visible = false;
             self.editor_visible = false;
+            hidden = true;
+            delay += Duration::from_millis(300);
         }
-        self.pending = Some(PendingCapture { settings, due: Instant::now() + delay });
+        self.pending = Some(PendingCapture { settings, due: Instant::now() + delay, hidden });
         crate::keepalive::wake_after(ctx, delay);
     }
 
     fn run_pending(&mut self, ctx: &egui::Context) {
         let Some(p) = self.pending.as_ref() else { return };
         if Instant::now() < p.due { crate::keepalive::wake_after(ctx, p.due - Instant::now()); return; }
+        if self.settings.hide_linkshot_during_capture && !p.hidden {
+            // Scheduled capture: the windows are hidden only now, just before the screen is grabbed.
+            self.capture_visible = false;
+            self.editor_visible = false;
+            let p = self.pending.as_mut().unwrap();
+            p.hidden = true;
+            p.due = Instant::now() + Duration::from_millis(350);
+            crate::keepalive::wake_after(ctx, Duration::from_millis(350));
+            return;
+        }
+        self.capture_toggled = false;
         let settings = self.pending.take().unwrap().settings;
         match linkshot_capture::snapshot() {
-            Err(e) => { self.set_status(format!("Capture failed: {e:#}")); self.show_capture_window(ctx, true); }
+            Err(e) => { self.set_status(format!("Capture failed: {e:#}")); self.restore_windows(ctx); }
             Ok(snap) => {
                 let primary = snap.monitors.iter().position(|m| m.is_primary).unwrap_or(0);
                 match settings.selection_mode {
@@ -439,8 +491,10 @@ impl App {
         if raise { crate::raise::raise_capture_window_now(); }
     }
 
+    /// After a cancelled or windowless capture: the Capture window comes back only if it was visible
+    /// before (or there is no tray icon to bring it back from).
     fn restore_windows(&mut self, ctx: &egui::Context) {
-        if !self.editor_visible { self.show_capture_window(ctx, true); }
+        if !self.editor_visible && (self.capture_was_visible || !self.tray.available) { self.show_capture_window(ctx, true); }
     }
 
     fn start_scrolling(&mut self, region: linkshot_core::Rect, monitor: linkshot_core::Rect, settings: CaptureSettings) {
@@ -484,8 +538,8 @@ impl App {
         }
     }
 
-    fn start_recording(&mut self, region: linkshot_core::Rect, monitor: linkshot_core::Rect, monitors: Vec<linkshot_core::Rect>, settings: CaptureSettings) {
-        if region.width() < 2.0 || region.height() < 2.0 { self.set_status("The region is too small to record."); return; }
+    fn start_recording(&mut self, ctx: &egui::Context, region: linkshot_core::Rect, monitor: linkshot_core::Rect, monitors: Vec<linkshot_core::Rect>, settings: CaptureSettings) {
+        if region.width() < 2.0 || region.height() < 2.0 { self.set_status("The region is too small to record."); self.restore_windows(ctx); return; }
         let fps = self.settings.video_quality.fps();
         let max_size = if self.settings.scale_video_to_1080p { Some((1920, 1080)) } else { None };
         let stamp = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S");
@@ -571,7 +625,9 @@ impl App {
         if !settings.preview_in_editor {
             self.editor.share_now(&mut doc, settings, &self.paths, &self.settings);
             if self.settings.auto_save_images { self.editor.autosave(&mut doc, &self.paths, &self.settings); }
-            self.restore_windows(ctx);
+            // The capture is done: the Capture window stays out of the way (tray icon / hotkey bring it
+            // back), unless there is no tray to get it back from.
+            if !self.tray.available { self.restore_windows(ctx); }
             self.set_status("Captured.");
             return;
         }
@@ -604,7 +660,7 @@ impl App {
                 TrayEvent::OpenEditor => self.dispatch(ctx, Action::OpenEditor),
                 TrayEvent::OpenCaptureWindow | TrayEvent::IconClicked => self.show_capture_window(ctx, false),
                 TrayEvent::Capture => { let s = self.presets.selected().clone(); self.start_capture(ctx, s); }
-                TrayEvent::ToggleWidget => self.dispatch(ctx, Action::ToggleWidget),
+                TrayEvent::RepeatLast => self.dispatch(ctx, Action::RepeatLastCapture),
                 TrayEvent::Preferences => self.dispatch(ctx, Action::ShowPreferences),
                 TrayEvent::Help => { let _ = linkshot_platform::open_url("https://github.com/ZeroDay-Labz/linkshot#readme"); }
                 TrayEvent::Exit => self.dispatch(ctx, Action::Quit),
@@ -633,11 +689,12 @@ impl App {
                     };
                     if let Some(img) = img {
                         let identical = discard && prev.as_ref().map(|p| linkshot_capture::images_identical(p, &img)).unwrap_or(false);
+                        let first = prev.is_none();
                         *prev = Some(img.clone());
                         if !identical {
-                            let mut s = settings.clone();
-                            s.preview_in_editor = true;
-                            self.finish_capture(ctx, img, None, &s);
+                            self.finish_capture(ctx, img, None, &settings);
+                            // Later ticks must not keep yanking the Editor to the front.
+                            if !first { self.editor.focus_requested = false; }
                         }
                     }
                 }
@@ -704,6 +761,9 @@ impl eframe::App for App {
             if let Some(r) = result {
                 let overlay = self.overlay.take().unwrap();
                 let settings = overlay.settings.clone();
+                // The overlay windows were drawn this pass; egui only removes them at the end of the
+                // next root pass, so ask for it right away instead of waiting for the next input event.
+                crate::keepalive::wake(ctx);
                 match r {
                     OverlayResult::Cancel => self.restore_windows(ctx),
                     OverlayResult::Image { region, cursor } => match overlay.snapshot.crop(region) { Some(img) => self.finish_capture(ctx, img, cursor, &settings), None => self.restore_windows(ctx) },
@@ -714,7 +774,7 @@ impl eframe::App for App {
                     OverlayResult::Video { region } => {
                         let monitor = overlay.monitor_for(region);
                         let monitors: Vec<linkshot_core::Rect> = overlay.snapshot.monitors.iter().map(|m| m.rect()).collect();
-                        self.start_recording(region, monitor, monitors, settings);
+                        self.start_recording(ctx, region, monitor, monitors, settings);
                     }
                 }
             }
@@ -780,7 +840,8 @@ impl eframe::App for App {
             for a in actions { self.dispatch(ctx, a); }
             if close {
                 self.editor_visible = false;
-                if !self.capture_visible && self.overlay.is_none() && self.pending.is_none() { self.dispatch(ctx, Action::ShowCaptureWindow); }
+                let busy = self.overlay.is_some() || self.pending.is_some() || self.scrolling.is_some() || self.recording.is_some() || self.interval_timer.is_some();
+                if !self.capture_visible && !busy && (self.capture_was_visible || !self.tray.available) { self.dispatch(ctx, Action::ShowCaptureWindow); }
             }
         }
 

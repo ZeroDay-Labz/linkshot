@@ -40,6 +40,8 @@ pub struct Overlay {
     pub result: Option<OverlayResult>,
     hover_window: Option<LRect>,
     hud_drag: Vec2,
+    /// Handle being dragged (index as in `draw_handles`) and the rectangle when the drag began.
+    resize: Option<(usize, LRect)>,
     width_text: String,
     height_text: String,
     pub frames: u32,
@@ -57,7 +59,7 @@ pub struct Overlay {
 impl Overlay {
     pub fn new(snapshot: Snapshot, monitor_idx: usize, settings: CaptureSettings, show_magnifier: bool) -> Self {
         let n = snapshot.monitors.len();
-        Self { snapshot, settings, textures: (0..n).map(|_| None).collect(), phase: Phase::Selecting { drag_start: None }, show_magnifier, result: None, hover_window: None, hud_drag: Vec2::ZERO, width_text: String::new(), height_text: String::new(), frames: 0, placement_started: false, active_monitor: monitor_idx, single_monitor: None, single_resolved: false, drag_point: std::cell::Cell::new(Pt::new(0.0, 0.0)) }
+        Self { snapshot, settings, textures: (0..n).map(|_| None).collect(), phase: Phase::Selecting { drag_start: None }, show_magnifier, result: None, hover_window: None, hud_drag: Vec2::ZERO, resize: None, width_text: String::new(), height_text: String::new(), frames: 0, placement_started: false, active_monitor: monitor_idx, single_monitor: None, single_resolved: false, drag_point: std::cell::Cell::new(Pt::new(0.0, 0.0)) }
     }
 
     /// Logical rect of the monitor that best contains `r` (for placing HUDs next to it).
@@ -99,6 +101,11 @@ impl Overlay {
     }
 
     /// Draws the overlay for monitor `m` into the current viewport.
+    fn set_dims(&mut self, r: LRect) {
+        self.width_text = format!("{}", r.width() as i64);
+        self.height_text = format!("{}", r.height() as i64);
+    }
+
     pub fn ui(&mut self, ctx: &egui::Context, pal: &Palette, m: usize) {
         self.frames += 1;
         let m = if self.single_monitor.is_some() { self.resolve_single(ctx) } else { m.min(self.snapshot.monitors.len().saturating_sub(1)) };
@@ -131,7 +138,7 @@ impl Overlay {
 
             // Window under the cursor (not while dragging).
             if has_pointer && matches!(self.phase, Phase::Selecting { drag_start: None }) {
-                self.hover_window = self.snapshot.window_at(lptr.x, lptr.y, "linkshot").map(|w| w.rect());
+                self.hover_window = self.snapshot.window_at(lptr.x, lptr.y, "LinkShot").map(|w| w.rect());
             } else if has_pointer { self.hover_window = None; }
 
             let phase = self.phase;
@@ -196,11 +203,11 @@ impl Overlay {
                         else { label_box(&painter, pointer + Vec2::new(60.0, -28.0), &format!("{}, {}", lptr.x as i64, lptr.y as i64), pal); }
                         // click (no drag) on a window = capture that window; Enter = capture hover window or this monitor
                         if resp.clicked() || enter {
-                            if let Some(w) = self.hover_window { self.width_text.clear(); self.phase = Phase::Selected { rect: w.round_out() }; self.hud_drag = Vec2::ZERO; }
-                            else if enter { self.phase = Phase::Selected { rect: self.mrect(m) }; self.hud_drag = Vec2::ZERO; }
+                            if let Some(w) = self.hover_window { let r = w.round_out(); self.set_dims(r); self.phase = Phase::Selected { rect: r }; self.hud_drag = Vec2::ZERO; }
+                            else if enter { let r = self.mrect(m); self.set_dims(r); self.phase = Phase::Selected { rect: r }; self.hud_drag = Vec2::ZERO; }
                         }
                         // help hint
-                        let hint = "Drag to select a region  •  Click a window  •  Enter: fullscreen  •  Shift 1:1 / Ctrl 16:9  •  M: magnifier  •  Esc: cancel";
+                        let hint = if self.snapshot.windows.is_empty() { "Drag to select a region  •  Enter: whole screen  •  Shift 1:1 / Ctrl 16:9  •  M: magnifier  •  Esc: cancel" } else { "Drag to select a region  •  Click a window  •  Enter: fullscreen  •  Shift 1:1 / Ctrl 16:9  •  M: magnifier  •  Esc: cancel" };
                         let hint_r = Rect::from_center_size(Pos2::new(view.center().x, view.top() + 30.0), Vec2::new(840.0, 32.0));
                         painter.rect_filled(hint_r.translate(Vec2::new(0.0, 2.0)), 16.0, Color32::from_black_alpha(60));
                         painter.rect_filled(hint_r, 16.0, Color32::from_rgba_unmultiplied(0x17, 0x1B, 0x20, 225));
@@ -214,6 +221,22 @@ impl Overlay {
                     painter.rect_stroke(vr, 0.0, Stroke::new(1.5_f32, orange), egui::StrokeKind::Outside);
                     draw_handles(&painter, vr.intersect(view), orange);
                     if self.show_magnifier && has_pointer { self.draw_magnifier(&painter, m, view, pointer, pal); }
+                    // Resize by dragging a handle.
+                    let handles = handle_points(vr);
+                    let hit = if has_pointer { handles.iter().position(|h| h.distance(pointer) <= 9.0) } else { None };
+                    if let Some(i) = hit.or(self.resize.map(|(i, _)| i)) {
+                        ctx.set_cursor_icon(match i { 0 | 7 => egui::CursorIcon::ResizeNwSe, 2 | 5 => egui::CursorIcon::ResizeNeSw, 1 | 6 => egui::CursorIcon::ResizeVertical, _ => egui::CursorIcon::ResizeHorizontal });
+                    }
+                    if resp.drag_started() { if let Some(i) = hit { self.resize = Some((i, r)); } }
+                    if let Some((i, start)) = self.resize {
+                        if resp.dragged() {
+                            let nr = resize_rect(start, i, lptr);
+                            self.set_dims(nr);
+                            self.phase = Phase::Selected { rect: nr };
+                        }
+                        if resp.drag_stopped() { self.resize = None; }
+                        return;
+                    }
                     let mode = self.settings.capture_mode;
                     let wants_hud = mode == CaptureMode::CaptureModeAllInOne || mode == CaptureMode::CaptureModeVideo;
                     if !wants_hud {
@@ -376,9 +399,26 @@ fn dim_outside(p: &egui::Painter, view: Rect, r: Rect) {
     p.rect_filled(Rect::from_min_max(Pos2::new(r.right(), r.top()), Pos2::new(view.right(), r.bottom())), 0.0, dim);
 }
 
+/// The eight resize handles: corners and edge midpoints, in a fixed order.
+fn handle_points(r: Rect) -> [Pos2; 8] {
+    [r.left_top(), r.center_top(), r.right_top(), r.left_center(), r.right_center(), r.left_bottom(), r.center_bottom(), r.right_bottom()]
+}
+
+/// Moves the edge(s) owned by handle `i` (see `handle_points`) to the logical pointer `p`.
+fn resize_rect(start: LRect, i: usize, p: Pt) -> LRect {
+    let (mut l, mut t, mut r, mut b) = (start.min.x, start.min.y, start.max.x, start.max.y);
+    if matches!(i, 0 | 3 | 5) { l = p.x.round(); }
+    if matches!(i, 2 | 4 | 7) { r = p.x.round(); }
+    if matches!(i, 0 | 1 | 2) { t = p.y.round(); }
+    if matches!(i, 5 | 6 | 7) { b = p.y.round(); }
+    let (l, r) = if l <= r { (l, r) } else { (r, l) };
+    let (t, b) = if t <= b { (t, b) } else { (b, t) };
+    LRect::from_points(Pt::new(l, t), Pt::new(r.max(l + 1.0), b.max(t + 1.0)))
+}
+
 fn draw_handles(p: &egui::Painter, r: Rect, c: Color32) {
     if r.width() <= 0.0 || r.height() <= 0.0 { return; }
-    for pt in [r.left_top(), r.center_top(), r.right_top(), r.left_center(), r.right_center(), r.left_bottom(), r.center_bottom(), r.right_bottom()] {
+    for pt in handle_points(r) {
         p.rect_filled(Rect::from_center_size(pt, Vec2::splat(7.0)), 1.5, Color32::WHITE);
         p.rect_stroke(Rect::from_center_size(pt, Vec2::splat(7.0)), 1.5, Stroke::new(1.0_f32, c), egui::StrokeKind::Outside);
     }

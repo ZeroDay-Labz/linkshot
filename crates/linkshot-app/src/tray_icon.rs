@@ -11,7 +11,7 @@ use crossbeam_channel::Receiver;
 pub enum TrayEvent {
     OpenEditor,
     OpenCaptureWindow,
-    ToggleWidget,
+    RepeatLast,
     Preferences,
     Exit,
     Help,
@@ -103,12 +103,12 @@ mod platform {
                 Self::item("Open LinkShot Editor", TrayEvent::OpenEditor),
                 Self::item("Open Capture Window", TrayEvent::OpenCaptureWindow),
                 Self::item("Capture", TrayEvent::Capture),
-                Self::item("LinkShot Capture Widget", TrayEvent::ToggleWidget),
+                Self::item("Repeat Last Capture", TrayEvent::RepeatLast),
                 MenuItem::Separator,
                 Self::item("Preferences...", TrayEvent::Preferences),
                 Self::item("Help", TrayEvent::Help),
                 MenuItem::Separator,
-                Self::item("Exit linkshot", TrayEvent::Exit),
+                Self::item("Exit LinkShot", TrayEvent::Exit),
             ]
         }
     }
@@ -143,14 +143,14 @@ mod platform {
             let open_editor = MenuItem::new("Open LinkShot Editor", true, None);
             let open_capture = MenuItem::new("Open Capture Window", true, None);
             let capture = MenuItem::new("Capture", true, None);
-            let widget = MenuItem::new("LinkShot Capture Widget", true, None);
+            let widget = MenuItem::new("Repeat Last Capture", true, None);
             let prefs = MenuItem::new("Preferences...", true, None);
             let help = MenuItem::new("Help", true, None);
-            let exit = MenuItem::new("Exit linkshot", true, None);
+            let exit = MenuItem::new("Exit LinkShot", true, None);
             let _ = menu.append_items(&[&open_editor, &open_capture, &capture, &widget, &PredefinedMenuItem::separator(), &prefs, &help, &PredefinedMenuItem::separator(), &exit]);
             let tray = tray_icon::TrayIconBuilder::new().with_menu(Box::new(menu)).with_tooltip("LinkShot").with_icon(icon).build();
             let _tray = match tray { Ok(t) => t, Err(e) => { tracing::warn!("tray icon failed: {e}"); return; } };
-            let ids = [(open_editor.id().clone(), TrayEvent::OpenEditor), (open_capture.id().clone(), TrayEvent::OpenCaptureWindow), (capture.id().clone(), TrayEvent::Capture), (widget.id().clone(), TrayEvent::ToggleWidget), (prefs.id().clone(), TrayEvent::Preferences), (help.id().clone(), TrayEvent::Help), (exit.id().clone(), TrayEvent::Exit)];
+            let ids = [(open_editor.id().clone(), TrayEvent::OpenEditor), (open_capture.id().clone(), TrayEvent::OpenCaptureWindow), (capture.id().clone(), TrayEvent::Capture), (widget.id().clone(), TrayEvent::RepeatLast), (prefs.id().clone(), TrayEvent::Preferences), (help.id().clone(), TrayEvent::Help), (exit.id().clone(), TrayEvent::Exit)];
             let menu_rx = MenuEvent::receiver();
             let icon_rx = tray_icon::TrayIconEvent::receiver();
             loop {
