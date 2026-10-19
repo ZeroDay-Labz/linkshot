@@ -287,6 +287,35 @@ pub fn run_shots(dir: &std::path::Path, files: &[std::path::PathBuf], dark: bool
         let img = render_frame(&gctx, &mut renderer, gsize, 2.0, bg, |ctx| gt.ui(ctx, &pal));
         img.save(dir.join("grab_text_results.png"))?;
     }
+    // Library view with a small synthetic library (thumbnails come from the worker thread).
+    {
+        let lib = dir.join("library");
+        std::fs::create_dir_all(&lib)?;
+        for (k, (name, color)) in [("Login page", [60u8, 120, 200]), ("Settings dialog", [200, 90, 60]), ("Terminal", [40, 40, 48]), ("Invoice", [240, 240, 236])].iter().enumerate() {
+            let (w, h) = (640u32 + k as u32 * 80, 400u32);
+            let mut img = RgbaImage::from_pixel(w, h, image::Rgba([color[0], color[1], color[2], 255]));
+            for y in 0..h { for x in 0..w { if (x / 40 + y / 40) % 2 == 0 { let p = img.get_pixel_mut(x, y); p.0[0] = p.0[0].saturating_add(12); p.0[1] = p.0[1].saturating_add(12); p.0[2] = p.0[2].saturating_add(12); } } }
+            let mut doc = linkshot_core::Document::from_png(w, h, linkshot_render::encode_png(&img)?);
+            doc.thumbnail_png = linkshot_render::encode_png(&linkshot_render::thumbnail(&img, 320, 180)).ok();
+            linkshot_core::snagx::write_file(&doc, &lib.join(format!("{name}.snagx")))?;
+        }
+        app.settings.library_directory = Some(lib.clone());
+        app.paths.cache_dir = dir.join("cache");
+        let _ = app.editor.library.scan(&lib);
+        app.editor.library_scanned = true;
+        app.editor.library_view = true;
+        app.editor.current = None;
+        let t0 = std::time::Instant::now();
+        let mut img = None;
+        while t0.elapsed().as_secs_f32() < 4.0 {
+            let frame = render_frame(&ectx, &mut renderer, egui::vec2(1280.0, 820.0), 1.5, bg, |ctx| crate::editor::editor_ui(&mut app, ctx, &mut actions));
+            img = Some(frame);
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            if t0.elapsed().as_secs_f32() > 1.5 { break; }
+        }
+        img.unwrap().save(dir.join("library.png"))?;
+        app.editor.library_view = false;
+    }
     // Built-in stamps as a contact sheet.
     {
         let set = crate::editor::stamps::builtin();
@@ -426,6 +455,34 @@ pub fn run_selftest() -> anyhow::Result<()> {
     crate::editor::tools::whole_image_op(&mut app, "Border", |img| linkshot_render::effects::border(img, linkshot_core::Argb::BLACK, 5));
     let p = app.editor.current_doc().unwrap().doc.page();
     anyhow::ensure!(p.capture_canvas_width == 410.0 && p.capture_canvas_height == 310.0, "border effect size wrong");
+    // 4b. Cut Out: remove 100 rows from the middle; an arrow below the band moves up by that much.
+    {
+        use linkshot_core::document::CaptureObject;
+        let (w, h) = (300u32, 400u32);
+        let mut img = image::RgbaImage::from_pixel(w, h, image::Rgba([40, 40, 40, 255]));
+        for y in 150..250 { for x in 0..w { img.put_pixel(x, y, image::Rgba([230, 30, 30, 255])); } }
+        let png = linkshot_render::encode_png(&img)?;
+        let mut doc = linkshot_core::Document::from_png(w, h, png);
+        let mut arrow = CaptureObject::new("Arrow");
+        arrow.points_array = vec![linkshot_core::Pt::new(20.0, 300.0), linkshot_core::Pt::new(120.0, 360.0)];
+        doc.page_mut().capture_objects.push(arrow);
+        let paths = app.paths.clone();
+        let s = app.settings.clone();
+        app.editor.add_document(&ectx, doc, &paths, &s);
+        app.editor.select_tool(linkshot_core::enums::ToolMode::CutOut);
+        app.editor.tools.region = Some(linkshot_core::Rect::from_xywh(0.0, 150.0, 300.0, 100.0));
+        crate::editor::tools::cut_out_apply(&mut app);
+        let d = app.editor.current_doc().unwrap().doc.clone();
+        let p = d.page();
+        anyhow::ensure!(p.capture_canvas_height == 300.0 && p.capture_canvas_width == 300.0, "cut out size {}x{}", p.capture_canvas_width, p.capture_canvas_height);
+        let o = &p.capture_objects[0];
+        anyhow::ensure!((o.points_array[0].y - 200.0).abs() < 0.01, "arrow should have moved up 100 px, is at {}", o.points_array[0].y);
+        let flat = app.editor.renderer.flatten(&d, p).context("flatten after cut out")?;
+        anyhow::ensure!(flat.get_pixel(150, 200).0[0] < 100, "the red band should be gone");
+        println!("selftest: cut out 100 rows -> {}x{}, annotation moved with the lower part", flat.width(), flat.height());
+        app.editor.docs.clear();
+        app.editor.current = None;
+    }
     // 5. Video: a synthetic recording spool → tray document → automatic GIF save → reopen as video.
     {
         use linkshot_video::FrameSource as _;

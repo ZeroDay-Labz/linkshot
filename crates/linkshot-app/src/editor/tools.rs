@@ -276,6 +276,7 @@ pub fn handle_input(app: &mut App, ui: &mut egui::Ui, resp: &Response, canvas: R
     if !ctx.memory(|m| m.focused().is_some()) && ctx.input(|i| i.key_pressed(egui::Key::Escape)) { app.editor.tools.region = None; app.editor.tools.poly_points.clear(); if app.editor.tools.text_edit.is_none() { app.editor.tools.selection.clear(); } }
     // Enter applies Crop
     if tool == ToolMode::Crop && ctx.input(|i| i.key_pressed(egui::Key::Enter)) { crop_apply(app); }
+    if tool == ToolMode::CutOut && ctx.input(|i| i.key_pressed(egui::Key::Enter)) { cut_out_apply(app); }
     // Ctrl+V pastes an image as an object
     if ctrl && ctx.input(|i| i.key_pressed(egui::Key::V)) && !ctx.memory(|m| m.focused().is_some()) { paste_image(app, ctx); }
 
@@ -314,7 +315,7 @@ pub fn handle_input(app: &mut App, ui: &mut egui::Ui, resp: &Response, canvas: R
             app.editor.tools.hover_handle = hover_handle;
             ctx.set_cursor_icon(match &app.editor.tools.hover_handle { Some(Handle::N | Handle::S) => egui::CursorIcon::ResizeVertical, Some(Handle::E | Handle::W) => egui::CursorIcon::ResizeHorizontal, Some(Handle::NE | Handle::SW) => egui::CursorIcon::ResizeNeSw, Some(Handle::NW | Handle::SE) => egui::CursorIcon::ResizeNwSe, Some(_) => egui::CursorIcon::Grab, None if over => egui::CursorIcon::Move, None => egui::CursorIcon::Default });
         }
-    } else if hover.is_some() && matches!(tool, ToolMode::Arrow | ToolMode::Line | ToolMode::Shape | ToolMode::Highlight | ToolMode::Blur | ToolMode::Magnify | ToolMode::Callouts | ToolMode::Text | ToolMode::Crop | ToolMode::Selection | ToolMode::Stamp) {
+    } else if hover.is_some() && matches!(tool, ToolMode::Arrow | ToolMode::Line | ToolMode::Shape | ToolMode::Highlight | ToolMode::Blur | ToolMode::Magnify | ToolMode::Callouts | ToolMode::Text | ToolMode::Crop | ToolMode::Selection | ToolMode::Stamp | ToolMode::CutOut) {
         ctx.set_cursor_icon(egui::CursorIcon::Crosshair);
     }
 
@@ -323,7 +324,7 @@ pub fn handle_input(app: &mut App, ui: &mut egui::Ui, resp: &Response, canvas: R
         // Anchor at the press position, not where the drag threshold was crossed.
         let dp = ctx.input(|i| i.pointer.press_origin()).map(|p| app.editor.canvas.screen_to_doc(p)).unwrap_or(dp);
         match tool {
-            ToolMode::VectorSelection | ToolMode::Favorites | ToolMode::Fill | ToolMode::Stamp | ToolMode::Eraser | ToolMode::MagicWand | ToolMode::SimplifiedUI | ToolMode::CutOut | ToolMode::None | ToolMode::DropZone | ToolMode::LastTool => {
+            ToolMode::VectorSelection | ToolMode::Favorites | ToolMode::Fill | ToolMode::Stamp | ToolMode::Eraser | ToolMode::MagicWand | ToolMode::SimplifiedUI | ToolMode::None | ToolMode::DropZone | ToolMode::LastTool => {
                 if tool == ToolMode::VectorSelection {
                     if let Some(h) = app.editor.tools.hover_handle.clone() {
                         // resize the (first) selected object that owns the handle
@@ -353,7 +354,7 @@ pub fn handle_input(app: &mut App, ui: &mut egui::Ui, resp: &Response, canvas: R
                     }
                 }
             }
-            ToolMode::Crop | ToolMode::Selection => {
+            ToolMode::Crop | ToolMode::Selection | ToolMode::CutOut => {
                 // A press on one of the region's handles resizes it; anywhere else starts a new region.
                 let handle = app.editor.tools.region.and_then(|r| {
                     let press = ctx.input(|i| i.pointer.press_origin()).unwrap_or_default();
@@ -442,7 +443,16 @@ pub fn handle_input(app: &mut App, ui: &mut egui::Ui, resp: &Response, canvas: R
                 }
                 bump(app);
             }
-            Drag::Region { start } => { app.editor.tools.region = Some(linkshot_core::Rect::from_points(*start, p2).round_out()); }
+            Drag::Region { start } => {
+                let mut r = linkshot_core::Rect::from_points(*start, p2).round_out();
+                if tool == ToolMode::CutOut {
+                    // A Cut Out band spans the whole canvas across the cut direction.
+                    let (horizontal, _) = super::side_panel::cut_out_parts(app.editor.current_props().cut_out_style);
+                    let page = app.editor.docs[app.editor.current.unwrap()].doc.page().canvas_rect();
+                    if horizontal { r.min.x = page.min.x; r.max.x = page.max.x; } else { r.min.y = page.min.y; r.max.y = page.max.y; }
+                }
+                app.editor.tools.region = Some(r);
+            }
             Drag::RegionResize { handle, start } => { app.editor.tools.region = Some(resize_region(*start, *handle, p2)); }
             Drag::Marquee { .. } => {}
             Drag::Pen { id } => {
@@ -623,6 +633,18 @@ pub fn draw_overlays(app: &mut App, ui: &mut egui::Ui, canvas: Rect, ctx: &egui:
                     if ui.button("Cancel").clicked() { app.editor.tools.region = None; }
                 });
             });
+        } else if app.editor.tool == ToolMode::CutOut {
+            // The band to remove: tinted red, with a Cut Out floaty.
+            painter.rect_filled(sr, 0.0, pal.capture_red.gamma_multiply(0.28));
+            painter.rect_stroke(sr, 0.0, Stroke::new(1.5_f32, pal.capture_red), egui::StrokeKind::Outside);
+            let fr = Rect::from_center_size(Pos2::new(sr.center().x, (sr.bottom() + 28.0).min(canvas.bottom() - 20.0)), Vec2::new(170.0, 30.0));
+            painter.rect_filled(fr, 3.0, pal.main_panel);
+            ui.scope_builder(egui::UiBuilder::new().max_rect(fr.shrink2(Vec2::new(6.0, 3.0))), |ui| {
+                ui.horizontal_centered(|ui| {
+                    if crate::widgets::flat_button(ui, &pal, "Cut Out", true).on_hover_text("Remove the band and join the rest (Enter)").clicked() { cut_out_apply(app); }
+                    if ui.button("Cancel").clicked() { app.editor.tools.region = None; }
+                });
+            });
         } else {
             // marching-ants style selection
             painter.rect_stroke(sr, 0.0, Stroke::new(1.0_f32, Color32::WHITE), egui::StrokeKind::Outside);
@@ -696,7 +718,7 @@ pub fn flatten_selection(app: &mut App) {
     if let Some(img) = app.editor.renderer.flatten(&doc, doc.page()) {
         if let Ok(png) = linkshot_render::encode_png(&img) {
             let d = &mut app.editor.docs[i];
-            d.edit("Flatten", |doc| { let page = doc.page_mut(); page.capture_objects = rest; page.capture_background_location = Pt::ZERO; let name = page.capture_background_image.clone(); doc.blobs.insert(name, png); });
+            d.edit("Flatten", |doc| { let page = doc.page_mut(); page.capture_objects = rest; page.capture_background_location = Pt::ZERO; let name = page.capture_background_image.clone(); doc.blobs.insert(name, std::sync::Arc::new(png)); });
             app.editor.renderer.invalidate();
         }
     }
@@ -711,7 +733,7 @@ pub fn whole_image_op(app: &mut App, name: &str, f: impl FnOnce(&image::RgbaImag
     let out = f(&img);
     let Ok(png) = linkshot_render::encode_png(&out) else { return };
     let (w, h) = (out.width() as f64, out.height() as f64);
-    app.editor.docs[i].edit(name, |doc| { let page = doc.page_mut(); page.capture_objects.clear(); page.capture_canvas_width = w; page.capture_canvas_height = h; page.capture_background_location = Pt::ZERO; page.corner_radius_ratio = Some(0.0); let n = page.capture_background_image.clone(); doc.blobs.insert(n, png); });
+    app.editor.docs[i].edit(name, |doc| { let page = doc.page_mut(); page.capture_objects.clear(); page.capture_canvas_width = w; page.capture_canvas_height = h; page.capture_background_location = Pt::ZERO; page.corner_radius_ratio = Some(0.0); let n = page.capture_background_image.clone(); doc.blobs.insert(n, std::sync::Arc::new(png)); });
     app.editor.renderer.invalidate();
     app.editor.tools.clear_selection();
     app.editor.canvas.fit_requested = true;
@@ -725,6 +747,66 @@ pub fn crop_apply(app: &mut App) {
     let r = linkshot_core::Rect { min: r.min.max(page.min), max: r.max.min(page.max) }.round_out();
     if r.is_empty() { return; }
     whole_image_op(app, "Crop", move |img| image::imageops::crop_imm(img, r.min.x as u32, r.min.y as u32, r.width() as u32, r.height() as u32).to_image());
+}
+
+/// Cut Out: removes the band under the region and joins the two remaining parts, with the chosen
+/// seam (none, fade, tear, sharktooth, wave, saw). Annotations in the band go; those past it move up.
+pub fn cut_out_apply(app: &mut App) {
+    use linkshot_core::enums::EdgeType;
+    let Some(r) = app.editor.tools.region.take() else { return };
+    let Some(i) = app.editor.current else { return };
+    let (horizontal, edge) = super::side_panel::cut_out_parts(app.editor.current_props().cut_out_style);
+    let kind = match edge.as_str() { "Fade" => EdgeType::Fade, "Tear" => EdgeType::Torn, "Sharktooth" => EdgeType::Sharktooth, "Wave" => EdgeType::Wave, "Saw" => EdgeType::Saw, _ => EdgeType::NoEdge };
+    let doc = app.editor.docs[i].doc.clone();
+    let page_rect = doc.page().canvas_rect();
+    let band = linkshot_core::Rect { min: r.min.max(page_rect.min), max: r.max.min(page_rect.max) }.round_out();
+    if band.is_empty() { return; }
+    // Only the background is cut; the annotations are moved as objects.
+    let mut bg_doc = doc.clone();
+    bg_doc.page_mut().capture_objects.clear();
+    let Some(img) = app.editor.renderer.flatten(&bg_doc, bg_doc.page()) else { return };
+    let (w, h) = img.dimensions();
+    let (a0, a1) = if horizontal { (band.min.y.max(0.0) as u32, (band.max.y as u32).min(h)) } else { (band.min.x.max(0.0) as u32, (band.max.x as u32).min(w)) };
+    if a1 <= a0 { return; }
+    let whole = if horizontal { h } else { w };
+    if a0 == 0 && a1 >= whole { app.editor.set_status("That would remove the whole image."); return; }
+    let size = 14u32;
+    let overlap = if kind == EdgeType::NoEdge { 0 } else { size };
+    let crop = |x: u32, y: u32, cw: u32, ch: u32| image::imageops::crop_imm(&img, x, y, cw, ch).to_image();
+    let (first, second) = if horizontal { (crop(0, 0, w, a0), crop(0, a1, w, h - a1)) } else { (crop(0, 0, a0, h), crop(a1, 0, w - a1, h)) };
+    let (first, second) = if kind == EdgeType::NoEdge { (first, second) } else {
+        let f = if first.width() > 0 && first.height() > 0 { linkshot_render::effects::edge(&first, kind, size, false, horizontal, false, !horizontal) } else { first };
+        let s = if second.width() > 0 && second.height() > 0 { linkshot_render::effects::edge(&second, kind, size, horizontal, false, !horizontal, false) } else { second };
+        (f, s)
+    };
+    let (ow, oh) = if horizontal { (w, (first.height() + second.height()).saturating_sub(overlap).max(1)) } else { ((first.width() + second.width()).saturating_sub(overlap).max(1), h) };
+    let mut out = image::RgbaImage::new(ow, oh);
+    if first.width() > 0 && first.height() > 0 { image::imageops::overlay(&mut out, &first, 0, 0); }
+    if second.width() > 0 && second.height() > 0 {
+        let (sx, sy) = if horizontal { (0i64, first.height() as i64 - overlap as i64) } else { (first.width() as i64 - overlap as i64, 0i64) };
+        image::imageops::overlay(&mut out, &second, sx.max(0), sy.max(0));
+    }
+    let Ok(png) = linkshot_render::encode_png(&out) else { return };
+    let shift = (a1 - a0) as f64 + overlap as f64;
+    let (ow, oh) = (ow as f64, oh as f64);
+    app.editor.docs[i].edit("Cut Out", |doc| {
+        let page = doc.page_mut();
+        page.capture_objects.retain_mut(|o| {
+            let c = o.bounds().center();
+            let v = if horizontal { c.y } else { c.x };
+            if v >= a0 as f64 && v < a1 as f64 { return false; }
+            if v >= a1 as f64 { o.translate(if horizontal { Pt::new(0.0, -shift) } else { Pt::new(-shift, 0.0) }); }
+            true
+        });
+        page.capture_canvas_width = ow;
+        page.capture_canvas_height = oh;
+        page.capture_background_location = Pt::ZERO;
+        let n = page.capture_background_image.clone();
+        doc.blobs.insert(n, std::sync::Arc::new(png));
+    });
+    app.editor.renderer.invalidate();
+    app.editor.tools.clear_selection();
+    app.editor.set_status(format!("Cut out {} {}.", a1 - a0, if horizontal { "rows" } else { "columns" }));
 }
 
 /// Clears the pending region to transparency (Selection tool → Delete).
@@ -778,7 +860,7 @@ pub fn fill_at(app: &mut App, p: Pt) {
     // Keep vector objects: write the fill into the background only.
     let Ok(png) = linkshot_render::encode_png(&out) else { return };
     let has_objects = !doc.page().capture_objects.is_empty();
-    app.editor.docs[i].edit("Fill", |doc| { let page = doc.page_mut(); if has_objects { page.capture_objects.clear(); } page.capture_background_location = Pt::ZERO; let n = page.capture_background_image.clone(); doc.blobs.insert(n, png); });
+    app.editor.docs[i].edit("Fill", |doc| { let page = doc.page_mut(); if has_objects { page.capture_objects.clear(); } page.capture_background_location = Pt::ZERO; let n = page.capture_background_image.clone(); doc.blobs.insert(n, std::sync::Arc::new(png)); });
     app.editor.renderer.invalidate();
 }
 

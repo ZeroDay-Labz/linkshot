@@ -409,7 +409,25 @@ fn tool_properties(app: &mut App, ui: &mut egui::Ui, tool: ToolMode) {
             ui.label(egui::RichText::new("Select an object to see its properties.").color(pal.input_secondary));
             ui.label(egui::RichText::new("Smart Move is planned for a later phase.").small().color(pal.input_secondary));
         }
-        ToolMode::Eraser | ToolMode::Stamp | ToolMode::CutOut | ToolMode::MagicWand | ToolMode::SimplifiedUI => {
+        ToolMode::CutOut => {
+            let (horizontal, edge) = cut_out_parts(q.cut_out_style);
+            ui.label("Direction");
+            ui.horizontal(|ui| {
+                ui.add_space(8.0);
+                let mut h = horizontal;
+                if ui.selectable_value(&mut h, true, "Horizontal").changed() || ui.selectable_value(&mut h, false, "Vertical").changed() { q.cut_out_style = cut_out_style(h, &edge); changed = true; }
+            });
+            ui.label("Edge");
+            ui.horizontal_wrapped(|ui| {
+                ui.add_space(8.0);
+                for name in ["None", "Fade", "Tear", "Sharktooth", "Wave", "Saw"] {
+                    if ui.selectable_label(edge == name, name).clicked() { q.cut_out_style = cut_out_style(horizontal, name); changed = true; }
+                }
+            });
+            ui.label(egui::RichText::new(if horizontal { "Drag across the rows to remove; the parts above and below are joined." } else { "Drag across the columns to remove; the parts left and right are joined." }).small().color(pal.input_secondary));
+            if app.editor.tools.region.is_some() { if crate::widgets::flat_button(ui, &pal, "Cut Out", true).clicked() { super::tools::cut_out_apply(app); } }
+        }
+        ToolMode::Eraser | ToolMode::MagicWand | ToolMode::SimplifiedUI => {
             ui.label(egui::RichText::new(format!("{} is planned for a later phase.", tool.label())).color(pal.input_secondary));
         }
         _ => {}
@@ -489,4 +507,16 @@ fn apply_effect(app: &mut App, e: EffectType, fx: &super::tools::EffectsState) {
         _ => {}
     }
     app.editor.tools.fx.current = None;
+}
+
+/// (`horizontal`, edge name) of a Cut Out style such as `HorzTearCutOut`.
+pub fn cut_out_parts(style: CutOutType) -> (bool, String) {
+    let s = style.as_str();
+    let horizontal = !s.starts_with("Vert");
+    let edge = s.trim_start_matches("Horz").trim_start_matches("Vert").trim_end_matches("CutOut");
+    (horizontal, if edge.is_empty() || edge == "Max" { "None".to_string() } else { edge.to_string() })
+}
+
+pub fn cut_out_style(horizontal: bool, edge: &str) -> CutOutType {
+    format!("{}{}CutOut", if horizontal { "Horz" } else { "Vert" }, edge).parse().unwrap_or_default()
 }

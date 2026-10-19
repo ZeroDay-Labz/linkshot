@@ -57,7 +57,7 @@ impl ScrollingUi {
         let [x, y] = self.position();
         egui::ViewportBuilder::default()
             .with_title(HUD_TITLE)
-            .with_app_id("linkshot")
+            .with_app_id(crate::app_id())
             .with_decorations(false)
             .with_transparent(true)
             .with_always_on_top()

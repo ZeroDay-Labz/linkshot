@@ -51,7 +51,8 @@ desktops) and on Windows:
   overlay and Screen Draw annotations; pause, resume, in/out points, lossless master kept for re-export.
 * **OCR / grab text** from any part of the screen with the bundled Tesseract.
 * **Image editor** with arrows, callouts, shapes, text, steps, stamps, highlights, blur, magnify, crop,
-  effects, quick styles and undo, where annotations stay editable objects. Captures are saved as `.snagx`
+  cut out (remove a band and join the rest with a torn, wave or seamless seam), effects, quick styles
+  and undo, where annotations stay editable objects. Captures are saved as `.snagx`
   (the same container layout Snagit uses, so a Snagit library opens in LinkShot) or exported as PNG, JPG,
   GIF, WebP, TIFF, BMP and ICO.
 * **Share** to file, clipboard, email, printer or any program, with presets, hotkeys and a tray icon.
@@ -83,13 +84,13 @@ desktops) and on Windows:
 * **Grab Text**: the *Grab Text* selection mode or Edit ▸ Grab Text extracts text with the bundled
   Tesseract into a results window with Copy All.
 * **Editor**: Move, Arrow, Line, Shape, Highlight, Text, Callout, Step, Stamp (a built-in set plus your
-  own PNGs), Pen, Blur, Magnify, Fill, Crop and Selection tools with properties and quick styles (themes
+  own PNGs), Pen, Blur, Magnify, Fill, Crop, Cut Out and Selection tools with properties and quick styles (themes
   with import/export); undo/redo; arrange; flatten; effects (border, shadow, edges, filters, colour
   adjustment, colour replacement, scale, trim); rotate/flip; resize; canvas colour; recent-captures tray
   with pinning; library browser; Copy All; Save / Save As (SNAGX, PNG, JPG, GIF, BMP, TIF, WebP, ICO);
   share to File / Clipboard / Program / Email / Printer; File ▸ Print. Dark mode is the default
   (View ▸ Theme), the UI uses the bundled Inter font and renders at the display's native pixel density.
-* **Capture options**: Capture Cursor (still images too, on KDE Plasma), a "Capturing in N" countdown for
+* **Capture options**: Capture Cursor (still images too), a "Capturing in N" countdown for
   delayed captures, video-size guides (G) and arrow-key nudging in the selection overlay, Window selection
   on KDE Plasma Wayland, and per-effect options (border colour and width, shadow size and direction, edge
   style and sides, filter, trim tolerance) for capture-time effects. Hotkeys are editable in Preferences.
@@ -104,8 +105,8 @@ desktops) and on Windows:
   prompt-free capture on KDE Plasma Wayland (KWin `ScreenShot2`), the XDG Screenshot portal on other Wayland
   desktops, `xcap` on X11 and Windows.
 
-Not yet: Simplify, Magic Wand, Cut Out, Eraser, templates, cloud share destinations, the pointer in still
-captures on X11 / Windows, webcam and system audio inside the Flatpak on desktops without PipeWire.
+Not yet: Simplify, Magic Wand, Eraser, templates, cloud share destinations (Imgur, Nextcloud), webcam
+and system audio inside the Flatpak on desktops without PipeWire or PulseAudio.
 
 ## Screenshots
 

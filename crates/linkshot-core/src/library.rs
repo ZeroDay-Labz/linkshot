@@ -58,13 +58,13 @@ impl LibraryIndex {
             if needs {
                 let mut entry = LibraryEntry { path: p.clone(), kind, created, modified, size: md.len(), tags: vec![], application: String::new(), website: String::new(), width: 0, height: 0 };
                 if kind == crate::enums::TrayItemType::Image {
-                    if let Ok(doc) = crate::snagx::read_file(&p) {
-                        entry.tags = doc.metadata.tags.clone();
-                        entry.width = doc.page().capture_canvas_width as u32;
-                        entry.height = doc.page().capture_canvas_height as u32;
-                        if let Some(v) = doc.metadata.extra.get("Application").and_then(|v| v.as_str()) { entry.application = v.into(); }
-                        if let Some(v) = doc.metadata.extra.get("Url").and_then(|v| v.as_str()) { entry.website = v.into(); }
-                        if let Some(s) = doc.metadata.extra.get("CaptureDate").and_then(|v| v.as_str()) { let _ = s; }
+                    // Only the metadata and page json are read; the images stay compressed in the file.
+                    if let Ok(sum) = crate::snagx::read_summary(&p) {
+                        entry.tags = sum.metadata.tags.clone();
+                        entry.width = sum.width;
+                        entry.height = sum.height;
+                        if let Some(v) = sum.metadata.extra.get("Application").and_then(|v| v.as_str()) { entry.application = v.into(); }
+                        if let Some(v) = sum.metadata.extra.get("Url").and_then(|v| v.as_str()) { entry.website = v.into(); }
                     }
                 }
                 self.entries.insert(p, entry);

@@ -3,6 +3,7 @@
 pub mod canvas;
 pub mod side_panel;
 pub mod stamps;
+pub mod library_thumbs;
 pub mod tools;
 pub mod tray;
 pub mod video_view;
@@ -99,6 +100,8 @@ pub struct EditorState {
     pub resize_lock: bool,
     pub library: linkshot_core::library::LibraryIndex,
     pub library_scanned: bool,
+    pub library_thumbs: Option<library_thumbs::LibraryThumbs>,
+    pub library_scan: Option<library_thumbs::ScanJob>,
     pub library_filter: String,
     pub selected_library: Vec<PathBuf>,
     pub new_image_dialog: bool,
@@ -156,6 +159,8 @@ impl EditorState {
             resize_lock: true,
             library: linkshot_core::library::LibraryIndex::default(),
             library_scanned: false,
+            library_thumbs: None,
+            library_scan: None,
             library_filter: String::new(),
             selected_library: vec![],
             new_image_dialog: false,
@@ -204,7 +209,8 @@ impl EditorState {
             let ext = file.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
             od.kind = if ext == "gif" { TrayItemType::AnimatedGif } else { TrayItemType::Video };
             let master = video_view::master_for(&file, paths);
-            od.video = Some(video_view::VideoDoc::open_file(file, master, paths.video_cache_dir(), self.wake.clone()));
+            // Decoding starts when the item is first shown, not for every video in the tray at start-up.
+            od.video = Some(video_view::VideoDoc::deferred(file, master, paths.video_cache_dir(), self.wake.clone()));
         }
         od
     }
@@ -395,8 +401,24 @@ impl EditorState {
         page.capture_background_location = linkshot_core::Pt::ZERO;
         page.capture_objects.clear();
         let name = page.capture_background_image.clone();
-        doc.blobs.insert(name, png);
+        doc.blobs.insert(name, std::sync::Arc::new(png));
         self.renderer.invalidate();
+    }
+
+    /// Scans the library folder on a worker thread (metadata only); the view updates when it is done.
+    pub fn start_library_scan(&mut self, dir: PathBuf) {
+        if self.library_scan.is_some() { return; }
+        self.library_scanned = true;
+        self.library_scan = Some(library_thumbs::ScanJob::start(self.library.clone(), dir, self.wake.clone()));
+    }
+
+    /// Picks up a finished scan.
+    pub fn poll_library_scan(&mut self) {
+        if let Some(idx) = self.library_scan.as_ref().and_then(|j| j.poll()) {
+            self.library = idx;
+            self.library_scan = None;
+            if let Some(t) = self.library_thumbs.as_mut() { t.retain(&self.library); }
+        }
     }
 
     pub fn current_props(&self) -> QuickStyle {
@@ -419,7 +441,7 @@ impl EditorState {
 
     pub fn select_tool(&mut self, t: ToolMode) {
         if t == ToolMode::Favorites || t == ToolMode::None { self.tool = t; return; }
-        if matches!(t, ToolMode::Eraser | ToolMode::MagicWand | ToolMode::SimplifiedUI | ToolMode::CutOut) {
+        if matches!(t, ToolMode::Eraser | ToolMode::MagicWand | ToolMode::SimplifiedUI) {
             self.set_status(format!("{} is not available yet", t.label()));
             return;
         }
@@ -619,7 +641,7 @@ pub fn flatten_all(d: &mut OpenDoc, renderer: &mut Renderer) {
                 page.capture_objects.clear();
                 page.capture_background_location = linkshot_core::Pt::ZERO;
                 let name = page.capture_background_image.clone();
-                doc.blobs.insert(name, png);
+                doc.blobs.insert(name, std::sync::Arc::new(png));
             });
             renderer.invalidate();
         }
@@ -830,7 +852,7 @@ fn editor_menu(app: &mut App, ui: &mut egui::Ui, ctx: &egui::Context, actions: &
         ui.separator();
         if ui.button("Details\tAlt+Enter").clicked() { let s = doc_details(app); app.editor.set_status(s); ui.close(); }
         if ui.checkbox(&mut app.editor.library_view, "Library").changed() {
-            if app.editor.library_view && !app.editor.library_scanned { let dir = app.settings.library_dir(&app.paths); let _ = app.editor.library.scan(&dir); app.editor.library_scanned = true; }
+            if app.editor.library_view && !app.editor.library_scanned { let dir = app.settings.library_dir(&app.paths); app.editor.start_library_scan(dir); }
             ui.close();
         }
         if ui.checkbox(&mut app.editor.tray_visible, "Recent Captures").changed() { app.settings.tray_visible = app.editor.tray_visible; app.mark_settings_dirty(); }
@@ -849,7 +871,7 @@ fn top_panel(app: &mut App, ui: &mut egui::Ui, rect: Rect, actions: &mut Vec<Act
     ui.scope_builder(egui::UiBuilder::new().max_rect(Rect::from_min_size(rect.min + Vec2::new(8.0, 6.0), Vec2::new(300.0, rect.height() - 12.0))), |ui| {
         ui.horizontal_centered(|ui| {
             let lib = widgets::icon_button(ui, 34.0, "Library", pal.control_dark, |p, r| icons::library_icon(p, r.shrink(6.0), if app.editor.library_view { pal.product } else { pal.text }));
-            if lib.clicked() { app.editor.library_view = !app.editor.library_view; if app.editor.library_view && !app.editor.library_scanned { let dir = app.settings.library_dir(&app.paths); let _ = app.editor.library.scan(&dir); app.editor.library_scanned = true; } }
+            if lib.clicked() { app.editor.library_view = !app.editor.library_view; if app.editor.library_view && !app.editor.library_scanned { let dir = app.settings.library_dir(&app.paths); app.editor.start_library_scan(dir); } }
             ui.add_space(4.0);
             // Capture button (red circle with camera)
             let (r, resp) = ui.allocate_exact_size(Vec2::new(94.0, 34.0), Sense::click());
@@ -1113,32 +1135,60 @@ fn library_view(app: &mut App, ui: &mut egui::Ui, rect: Rect, ctx: &egui::Contex
         ui.label(egui::RichText::new("Tags").strong());
         for t in app.editor.library.all_tags() { if ui.selectable_label(app.editor.library_filter == t, &t).clicked() { app.editor.library_filter = t; } }
         ui.add_space(8.0);
-        if ui.button("Refresh").clicked() { let dir = app.settings.library_dir(&app.paths); let _ = app.editor.library.scan(&dir); }
+        if ui.button("Refresh").clicked() { let dir = app.settings.library_dir(&app.paths); app.editor.library_scanned = false; app.editor.start_library_scan(dir); }
+        if app.editor.library_scan.is_some() { ui.label(egui::RichText::new("Scanning…").small().color(pal.input_secondary)); }
         ui.label(egui::RichText::new(app.settings.library_dir(&app.paths).display().to_string()).small().color(pal.input_secondary));
     });
+    app.editor.poll_library_scan();
+    if app.editor.library_thumbs.is_none() { app.editor.library_thumbs = Some(library_thumbs::LibraryThumbs::new(app.editor.wake.clone())); }
     let grid = Rect::from_min_max(Pos2::new(search.right(), rect.top()), rect.max);
     ui.scope_builder(egui::UiBuilder::new().max_rect(grid.shrink(10.0)), |ui| {
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            let filter = app.editor.library_filter.to_lowercase();
-            let mut entries: Vec<_> = app.editor.library.entries.values().filter(|e| filter.is_empty() || e.path.to_string_lossy().to_lowercase().contains(&filter) || e.tags.iter().any(|t| t.to_lowercase().contains(&filter))).cloned().collect();
-            entries.sort_by(|a, b| b.modified.cmp(&a.modified));
-            ui.horizontal_wrapped(|ui| {
-                for e in entries {
-                    let (r, resp) = ui.allocate_exact_size(Vec2::new(176.0, 120.0), Sense::click());
-                    ui.painter().rect_filled(r.translate(Vec2::new(0.0, 2.0)), 8.0, Color32::from_black_alpha(40));
-                    ui.painter().rect_filled(r, 8.0, pal.control);
-                    ui.painter().rect_stroke(r, 8.0, Stroke::new(1.0_f32, pal.control_outline), egui::StrokeKind::Inside);
-                    ui.painter().text(Pos2::new(r.center().x, r.bottom() - 10.0), Align2::CENTER_CENTER, e.path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(), FontId::proportional(11.0), pal.text);
-                    ui.painter().text(Pos2::new(r.center().x, r.center().y - 10.0), Align2::CENTER_CENTER, format!("{}×{}", e.width, e.height), FontId::proportional(12.0), pal.input_secondary);
-                    if resp.hovered() { ui.painter().rect_stroke(r, 8.0, Stroke::new(2.0_f32, pal.product), egui::StrokeKind::Inside); }
-                    if resp.double_clicked() {
-                        if let Some(i) = app.editor.docs.iter().position(|d| d.doc.path.as_ref() == Some(&e.path)) { app.editor.current = Some(i); }
-                        else if let Ok(doc) = crate::share::open_file(&e.path) { app.editor.add_document(ctx, doc, &app.paths, &app.settings); }
-                        app.editor.library_view = false;
+        let filter = app.editor.library_filter.to_lowercase();
+        let mut entries: Vec<_> = app.editor.library.entries.values().filter(|e| filter.is_empty() || e.path.to_string_lossy().to_lowercase().contains(&filter) || e.tags.iter().any(|t| t.to_lowercase().contains(&filter))).cloned().collect();
+        entries.sort_by(|a, b| b.modified.cmp(&a.modified));
+        if entries.is_empty() {
+            ui.add_space(40.0);
+            ui.vertical_centered(|ui| { ui.label(egui::RichText::new(if app.editor.library_scan.is_some() { "Scanning the library…" } else { "No captures in the library yet." }).color(pal.input_secondary)); });
+            return;
+        }
+        // Only the visible rows are laid out, so a library of thousands stays instant.
+        const CARD_W: f32 = library_thumbs::THUMB_W as f32 + 8.0;
+        const CARD_H: f32 = library_thumbs::THUMB_H as f32 + 30.0;
+        let cols = ((ui.available_width() + 8.0) / (CARD_W + 8.0)).floor().max(1.0) as usize;
+        let rows = entries.len().div_ceil(cols);
+        let cache_dir = app.paths.thumbnails_dir();
+        let mut open: Option<PathBuf> = None;
+        egui::ScrollArea::vertical().show_rows(ui, CARD_H + 8.0, rows, |ui, range| {
+            for row in range {
+                ui.horizontal(|ui| {
+                    for e in entries.iter().skip(row * cols).take(cols) {
+                        let (r, resp) = ui.allocate_exact_size(Vec2::new(CARD_W, CARD_H), Sense::click());
+                        ui.painter().rect_filled(r.translate(Vec2::new(0.0, 2.0)), 8.0, Color32::from_black_alpha(40));
+                        ui.painter().rect_filled(r, 8.0, pal.control);
+                        ui.painter().rect_stroke(r, 8.0, Stroke::new(1.0_f32, pal.control_outline), egui::StrokeKind::Inside);
+                        let thumb_area = Rect::from_min_size(r.min + Vec2::new(4.0, 4.0), Vec2::new(library_thumbs::THUMB_W as f32, library_thumbs::THUMB_H as f32));
+                        match app.editor.library_thumbs.as_mut().unwrap().texture(ctx, e, &cache_dir) {
+                            Some(tid) => {
+                                let size = ctx.tex_manager().read().meta(tid).map(|m| Vec2::new(m.size[0] as f32, m.size[1] as f32)).unwrap_or(thumb_area.size());
+                                let img_rect = Rect::from_center_size(thumb_area.center(), size.min(thumb_area.size()));
+                                ui.painter().image(tid, img_rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+                            }
+                            None => { ui.painter().text(thumb_area.center(), Align2::CENTER_CENTER, format!("{}×{}", e.width, e.height), FontId::proportional(12.0), pal.input_secondary); }
+                        }
+                        let name = e.path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+                        let badge = match e.kind { TrayItemType::Video => " · MP4", TrayItemType::AnimatedGif => " · GIF", _ => "" };
+                        ui.painter().with_clip_rect(r).text(Pos2::new(r.center().x, r.bottom() - 12.0), Align2::CENTER_CENTER, format!("{name}{badge}"), FontId::proportional(11.0), pal.text);
+                        if resp.hovered() { ui.painter().rect_stroke(r, 8.0, Stroke::new(2.0_f32, pal.product), egui::StrokeKind::Inside); resp.clone().on_hover_text(format!("{}\n{}×{} · {}", e.path.display(), e.width, e.height, e.modified.format("%Y-%m-%d %H:%M"))); }
+                        if resp.double_clicked() { open = Some(e.path.clone()); }
                     }
-                }
-            });
+                });
+            }
         });
+        if let Some(path) = open {
+            if let Some(i) = app.editor.docs.iter().position(|d| d.doc.path.as_ref() == Some(&path)) { app.editor.current = Some(i); }
+            else if let Ok(doc) = crate::share::open_file(&path) { app.editor.add_document(ctx, doc, &app.paths, &app.settings); }
+            app.editor.library_view = false;
+        }
     });
 }
 

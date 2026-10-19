@@ -811,7 +811,7 @@ impl eframe::App for App {
                 let title = format!("linkshot capture overlay {name}");
                 let mut builder = egui::ViewportBuilder::default()
                     .with_title(&title)
-                    .with_app_id("linkshot")
+                    .with_app_id(crate::app_id())
                     .with_decorations(false)
                     .with_always_on_top()
                     .with_taskbar(false)
@@ -873,7 +873,7 @@ impl eframe::App for App {
                     }
                     let pal = self.pal;
                     let secs = remaining.as_secs_f32().ceil().max(1.0) as u32;
-                    let builder = egui::ViewportBuilder::default().with_title(COUNTDOWN_TITLE).with_app_id("linkshot").with_decorations(false).with_transparent(true)
+                    let builder = egui::ViewportBuilder::default().with_title(COUNTDOWN_TITLE).with_app_id(crate::app_id()).with_decorations(false).with_transparent(true)
                         .with_always_on_top().with_taskbar(false).with_resizable(false).with_mouse_passthrough(true).with_inner_size([COUNTDOWN_W, COUNTDOWN_H]).with_position(pos);
                     ctx.show_viewport_immediate(egui::ViewportId::from_hash_of("countdown"), builder, |ctx, _class| {
                         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(egui::Color32::TRANSPARENT)).show(ctx, |ui| {
@@ -915,7 +915,7 @@ impl eframe::App for App {
         if self.capture_visible {
             let builder = egui::ViewportBuilder::default()
                 .with_title(crate::raise::CAPTURE_TITLE)
-                .with_app_id("linkshot")
+                .with_app_id(crate::app_id())
                 .with_inner_size(self.capture_window_size())
                 .with_min_inner_size([420.0, 220.0])
                 .with_decorations(false)
@@ -940,7 +940,7 @@ impl eframe::App for App {
             let (pos, size, min) = geometry;
             let mut builder = egui::ViewportBuilder::default()
                 .with_title("LinkShot Editor")
-                .with_app_id("linkshot")
+                .with_app_id(crate::app_id())
                 .with_decorations(false)
                 .with_inner_size(size)
                 .with_min_inner_size(min);

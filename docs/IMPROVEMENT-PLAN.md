@@ -23,12 +23,15 @@ A prioritised list from a full read-through of the code on 2026-10-18, followed 
 6. **Memory blow-up on large captures** — every edit clones the whole `Document` including PNG blobs,
    drags clone again, `commit` byte-compares blobs, and the undo stack keeps before+after for 200
    steps. Store blobs as `Arc<Vec<u8>>` so clones are refcounts and compares are pointer checks.
+   **done** (0.4.0)
 
 ## Important
 
 7. **Blocking work on the UI thread** — `snapshot()` runs inline for timed/interval captures (a portal
    round-trip on GNOME); the library scan reads every `.snagx` fully on a toolbar click. Move both
-   to worker threads; have the scanner read only the metadata and page JSON.
+   to worker threads; have the scanner read only the metadata and page JSON. **Library part done**
+   (0.4.0: metadata-only scan on a worker thread, cached thumbnails, virtualised grid); the snapshot
+   for timed captures still runs inline.
 8. **Non-KDE Wayland scrolling/video** — region frames fall back to a full portal screenshot per frame,
    so the 40 ms scrolling loop and the 30 fps recorder hammer the portal. Add a ScreenCast/PipeWire
    frame source (the `screencast` feature is already enabled but unused) or disable those modes
@@ -43,10 +46,11 @@ A prioritised list from a full read-through of the code on 2026-10-18, followed 
     `cache/video` is unbounded, Program/Email temp exports land inside the library. Delete masters
     with their files, cap the caches, write temps to the cache dir.
 12. **Startup decodes every tray video** — one ffmpeg decode per video in the tray even if never
-    viewed. Decode lazily when the item becomes current.
+    viewed. Decode lazily when the item becomes current. **done** (0.4.0)
 13. **Single export slot** — starting a second export drops the receiver of the running one; the file
     is written but the tray is not updated. Queue exports or refuse while busy.
-14. **Windows gaps** — no single-instance guard, cursor not drawn on still captures, window capture
+14. **Windows gaps** — no single-instance guard (**done** 0.4.0), cursor not drawn on still captures
+    (**done** 0.4.0, GDI), window capture
     unavailable on Wayland (KWin `CaptureActiveWindow` exists but is unused). `run_program` re-splits
     the substituted command line, so a file name containing `"` breaks the Program destination.
     (Autostart via the Run key: **done**.)
@@ -110,8 +114,7 @@ Still open:
 - `--capture` at launch bypasses delay/schedule settings; fullscreen selection always takes the primary
   monitor (use the pointer's); scrolling direction keys (H/V/B) and horizontal mode; `hdr_capture`,
   `tooltip_mode` and `capture_window_pos` are stored but never read; Shift+Enter in the overlay.
-- The pointer in still captures on X11 / Windows (xcap has no cursor option; draw a cursor object at the
-  recorded position instead).
+- Cut Out, the pointer on X11 / Windows: **done** (0.4.0).
 - The GlobalShortcuts portal session is re-created on every rebind (see item 10 above).
 - Audio: the start of a track is aligned by wall clock (within ~50 ms); no per-track volume; no
   separate mic / system tracks kept after mixing. Webcam on Linux needs `/dev/video*` (inside the

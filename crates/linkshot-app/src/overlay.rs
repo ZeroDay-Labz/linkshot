@@ -366,7 +366,8 @@ impl Overlay {
                 }
             }
         });
-        ctx.request_repaint();
+        // Pointer motion repaints on its own; this keeps the HUD animations going without a busy loop.
+        ctx.request_repaint_after(std::time::Duration::from_millis(40));
     }
 
     // Last pointer position of an in-progress drag (shared so non-dragging viewports can draw the rect).

@@ -264,7 +264,7 @@ impl RecordingUi {
         let ([x, y], _) = self.position();
         egui::ViewportBuilder::default()
             .with_title(HUD_TITLE)
-            .with_app_id("linkshot")
+            .with_app_id(crate::app_id())
             .with_decorations(false)
             .with_transparent(true)
             .with_always_on_top()
@@ -294,7 +294,7 @@ impl RecordingUi {
     pub fn frame_builder(&self, i: usize, r: Rect) -> egui::ViewportBuilder {
         egui::ViewportBuilder::default()
             .with_title(format!("{FRAME_TITLE} {i}"))
-            .with_app_id("linkshot")
+            .with_app_id(crate::app_id())
             .with_decorations(false)
             .with_transparent(true)
             .with_always_on_top()

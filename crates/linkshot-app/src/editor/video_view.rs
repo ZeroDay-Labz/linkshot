@@ -36,6 +36,8 @@ pub struct VideoDoc {
     pub looping: bool,
     pub error: Option<String>,
     scrub_drag: bool,
+    /// Decoding deferred until the document is shown (the tray can hold many videos).
+    pending_open: Option<(PathBuf, Option<PathBuf>, PathBuf)>,
     /// The mixed sound track (`<master stem>.wav`), when the recording or file has one.
     pub audio: Option<PathBuf>,
     pub audio_muted: bool,
@@ -58,7 +60,23 @@ impl VideoDoc {
         let (width, height, frames, duration_ms) = (reader.width(), reader.height(), reader.len(), reader.duration_ms());
         let player = Player::spawn(Box::new(reader), wake.clone());
         let audio = audio_for(&master);
-        Ok(Self { file, master: Some(master), loading: None, player: Some(player), wake, frame: None, texture: None, tex_index: None, playing: false, position_ms: 0, duration_ms, width, height, frames, in_ms: None, out_ms: None, looping: false, error: None, scrub_drag: false, audio, audio_muted: false, playback: None })
+        Ok(Self { file, master: Some(master), loading: None, player: Some(player), wake, frame: None, texture: None, tex_index: None, playing: false, position_ms: 0, duration_ms, width, height, frames, in_ms: None, out_ms: None, looping: false, error: None, scrub_drag: false, pending_open: None, audio, audio_muted: false, playback: None })
+    }
+
+    /// A GIF/MP4 file whose decoding waits until the document is first shown.
+    pub fn deferred(file: PathBuf, master: Option<PathBuf>, cache_dir: PathBuf, wake: Arc<dyn Fn() + Send + Sync>) -> Self {
+        // The lossless master (when it exists) is known up front so exports work before the first play.
+        let known_master = master.clone().filter(|m| m.is_file());
+        let audio = known_master.as_deref().and_then(audio_for);
+        Self { file: Some(file.clone()), master: known_master, loading: None, player: None, wake, frame: None, texture: None, tex_index: None, playing: false, position_ms: 0, duration_ms: 0, width: 0, height: 0, frames: 0, in_ms: None, out_ms: None, looping: false, error: None, scrub_drag: false, pending_open: Some((file, master, cache_dir)), audio, audio_muted: false, playback: None }
+    }
+
+    /// Starts the deferred decode (called when the document becomes current).
+    pub fn ensure_open(&mut self) {
+        if let Some((file, master, cache_dir)) = self.pending_open.take() {
+            let wake = self.wake.clone();
+            *self = Self::open_file(file, master, cache_dir, wake);
+        }
     }
 
     /// A GIF/MP4 file: decoded into the cache in the background (the poster is shown meanwhile).
@@ -72,7 +90,7 @@ impl VideoDoc {
             let _ = tx.send(res);
             w();
         });
-        Self { file: Some(file), master: None, loading: Some(rx), player: None, wake, frame: None, texture: None, tex_index: None, playing: false, position_ms: 0, duration_ms: 0, width: 0, height: 0, frames: 0, in_ms: None, out_ms: None, looping: false, error: None, scrub_drag: false, audio: None, audio_muted: false, playback: None }
+        Self { file: Some(file), master: None, loading: Some(rx), player: None, wake, frame: None, texture: None, tex_index: None, playing: false, position_ms: 0, duration_ms: 0, width: 0, height: 0, frames: 0, in_ms: None, out_ms: None, looping: false, error: None, scrub_drag: false, pending_open: None, audio: None, audio_muted: false, playback: None }
     }
 
     pub fn is_ready(&self) -> bool { self.player.is_some() }
@@ -106,6 +124,7 @@ impl VideoDoc {
     pub fn range(&self) -> (Option<u32>, Option<u32>) { (self.in_ms, self.out_ms) }
 
     pub fn poll(&mut self) {
+        self.ensure_open();
         if let Some(rx) = &self.loading {
             match rx.try_recv() {
                 Ok(Ok(master)) => {

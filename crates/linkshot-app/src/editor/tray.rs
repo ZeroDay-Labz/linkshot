@@ -99,7 +99,7 @@ pub fn tray_ui(app: &mut App, ui: &mut egui::Ui, rect: Rect, ctx: &egui::Context
                 if lresp.hovered() { ui.painter().rect_filled(lr, 8.0, pal.control); }
                 icons::library_icon(ui.painter(), Rect::from_center_size(Pos2::new(lr.left() + 20.0, lr.center().y), Vec2::splat(18.0)), pal.text_bright);
                 ui.painter().text(Pos2::new(lr.left() + 38.0, lr.center().y), Align2::LEFT_CENTER, "Library", FontId::proportional(14.0), pal.text_bright);
-                if lresp.on_hover_text("Switch to Library").clicked() { app.editor.library_view = !app.editor.library_view; if app.editor.library_view && !app.editor.library_scanned { let dir = app.settings.library_dir(&app.paths); let _ = app.editor.library.scan(&dir); app.editor.library_scanned = true; } }
+                if lresp.on_hover_text("Switch to Library").clicked() { app.editor.library_view = !app.editor.library_view; if app.editor.library_view && !app.editor.library_scanned { let dir = app.settings.library_dir(&app.paths); app.editor.start_library_scan(dir); } }
             });
         });
     });

@@ -12,6 +12,10 @@ mod keepalive;
 mod overlay;
 mod raise;
 mod recording_hud;
+
+/// Window app id: the Flatpak id inside the sandbox (so the desktop matches our windows to the
+/// exported desktop file and icon), `linkshot` otherwise.
+pub fn app_id() -> String { std::env::var("FLATPAK_ID").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "linkshot".to_string()) }
 mod screen_draw;
 mod scrolling_hud;
 mod grab_text;
@@ -53,7 +57,7 @@ fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title(keepalive::TITLE)
-            .with_app_id("linkshot")
+            .with_app_id(crate::app_id())
             .with_inner_size([2.0, 2.0])
             .with_min_inner_size([2.0, 2.0])
             .with_max_inner_size([2.0, 2.0])

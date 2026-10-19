@@ -53,7 +53,7 @@ impl GrabTextUi {
     pub fn viewport_builder() -> egui::ViewportBuilder {
         egui::ViewportBuilder::default()
             .with_title("Grab Text Results")
-            .with_app_id("linkshot")
+            .with_app_id(crate::app_id())
             .with_inner_size([600.0, 420.0])
             .with_min_inner_size([360.0, 240.0])
             .with_always_on_top()

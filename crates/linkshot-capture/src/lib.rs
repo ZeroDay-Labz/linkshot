@@ -22,6 +22,7 @@ pub mod portal;
 #[cfg(target_os = "linux")]
 pub mod wayland_outputs;
 
+pub mod cursor;
 pub mod stitch;
 pub mod video;
 pub mod webcam;
@@ -294,7 +295,9 @@ pub fn snapshot_with_cursor(include_cursor: bool) -> Result<Snapshot> {
         images.push(img);
     }
     let windows = windows().unwrap_or_default();
-    Ok(Snapshot { monitors, images, windows, taken_at: std::time::Instant::now() })
+    let mut snap = Snapshot { monitors, images, windows, taken_at: std::time::Instant::now() };
+    if include_cursor { cursor::composite(&mut snap); }
+    Ok(snap)
 }
 
 /// Captures a region of the live screen (logical virtual-desktop coordinates) at native resolution,

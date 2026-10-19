@@ -47,7 +47,45 @@ pub fn read_bytes(bytes: &[u8]) -> Result<Document> {
         pages.push(page);
     }
     anyhow::ensure!(!pages.is_empty(), "snagx has no pages");
-    Ok(Document { metadata, pages, blobs: members, thumbnail_png, path: None })
+    let blobs = members.into_iter().map(|(k, v)| (k, std::sync::Arc::new(v))).collect();
+    Ok(Document { metadata, pages, blobs, thumbnail_png, path: None })
+}
+
+/// What a library listing needs from a `.snagx` without decoding its images: metadata, the first
+/// page's canvas size and the stored thumbnail. Reads only those zip members.
+#[derive(Clone, Debug, Default)]
+pub struct Summary {
+    pub metadata: Metadata,
+    pub width: u32,
+    pub height: u32,
+    pub thumbnail_png: Option<Vec<u8>>,
+}
+
+pub fn read_summary(path: &Path) -> Result<Summary> {
+    let file = std::fs::File::open(path).with_context(|| format!("open {}", path.display()))?;
+    let mut zip = zip::ZipArchive::new(std::io::BufReader::new(file)).context("not a zip archive")?;
+    let names: Vec<String> = zip.file_names().map(str::to_string).collect();
+    let mut member = |name: &str| -> Option<Vec<u8>> {
+        let mut f = zip.by_name(name).ok()?;
+        let mut buf = Vec::with_capacity(f.size() as usize);
+        f.read_to_end(&mut buf).ok()?;
+        Some(buf)
+    };
+    let metadata: Metadata = member("metadata.json").and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    let thumbnail_png = member("thumbnail.png");
+    let first_page = member("index.json").and_then(|b| serde_json::from_slice::<Index>(&b).ok()).and_then(|i| i.pages.first().cloned());
+    let (mut width, mut height) = (0, 0);
+    let page_name = match first_page {
+        Some(n) => Some(n),
+        // No index: the first top-level page json.
+        None => names.iter().filter(|k| k.ends_with(".json") && k.as_str() != "metadata.json" && !k.ends_with(".backup.json")).min().cloned(),
+    };
+    if let Some(name) = page_name {
+        if let Some(b) = member(&name) {
+            if let Ok(page) = serde_json::from_slice::<Page>(&b) { width = page.capture_canvas_width as u32; height = page.capture_canvas_height as u32; }
+        }
+    }
+    Ok(Summary { metadata, width, height, thumbnail_png })
 }
 
 pub fn read_file(path: &Path) -> Result<Document> {
@@ -96,7 +134,7 @@ pub fn write_bytes(doc: &Document) -> Result<Vec<u8>> {
         }
         for (name, bytes) in &doc.blobs {
             zip.start_file(name, stored)?;
-            zip.write_all(bytes)?;
+            zip.write_all(bytes.as_slice())?;
         }
         zip.finish()?;
     }

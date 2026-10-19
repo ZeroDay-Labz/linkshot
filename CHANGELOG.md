@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.4.0 — 2026-10-19
+
+- **Cut Out tool** (Editor): drag a band across the rows or columns to remove it; the two parts are
+  joined with a seamless, fade, tear, sharktooth, wave or saw seam. Annotations in the band go, the
+  ones past it move up with the image.
+- **Pointer in still captures on X11 and Windows** (XFixes / GDI), matching what KDE already did.
+- **Library at scale.** The library scan reads only metadata (no image decoding) on a worker thread,
+  the grid lays out only the visible rows, and each card shows a thumbnail cached as a small PNG.
+  Tray videos are decoded when first shown rather than all at start-up.
+- **Memory.** A document's image blobs are shared between undo steps and drag copies instead of being
+  copied, so editing a large scrolling capture no longer multiplies its size per step.
+- Editor drawing is much faster with drop shadows, translucency and large captures, and the window
+  no longer jiggles while it is moved and can be resized from its edges and corners (plexscript, PRs
+  #1 and #2).
+- Windows: one instance per user (a second launch raises the running one or starts a capture).
+- Flatpak: windows carry the Flatpak app id so the desktop shows the right icon for them.
+- The selection overlay no longer repaints in a busy loop while idle.
+
 ## 0.3.1 — 2026-10-19
 
 - **Flatpak: overlays landed on the wrong screens.** Inside the sandbox LinkShot was not allowed to own

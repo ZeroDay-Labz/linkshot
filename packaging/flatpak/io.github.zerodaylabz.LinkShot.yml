@@ -50,7 +50,7 @@ modules:
       - install -Dm755 target/release/linkshot /app/bin/linkshot
       - mkdir -p /app/lib/linkshot && cp -a bundle/. /app/lib/linkshot/
       - install -Dm644 packaging/linux/linkshot.desktop /app/share/applications/io.github.zerodaylabz.LinkShot.desktop
-      - sed -i 's/^Icon=linkshot/Icon=io.github.zerodaylabz.LinkShot/' /app/share/applications/io.github.zerodaylabz.LinkShot.desktop
+      - sed -i 's/^Icon=linkshot/Icon=io.github.zerodaylabz.LinkShot/; s/^StartupWMClass=linkshot/StartupWMClass=io.github.zerodaylabz.LinkShot/' /app/share/applications/io.github.zerodaylabz.LinkShot.desktop
       - install -Dm644 packaging/linux/io.github.zerodaylabz.LinkShot.metainfo.xml /app/share/metainfo/io.github.zerodaylabz.LinkShot.metainfo.xml
       - for s in 16 22 24 32 48 64 128 256 512; do install -Dm644 packaging/icons/linkshot-$s.png /app/share/icons/hicolor/${s}x${s}/apps/io.github.zerodaylabz.LinkShot.png; done
       - install -Dm644 assets/linkshot.svg /app/share/icons/hicolor/scalable/apps/io.github.zerodaylabz.LinkShot.svg

@@ -574,7 +574,8 @@ pub struct Document {
     pub metadata: Metadata,
     pub pages: Vec<Page>,
     /// Zip members (PNG bytes) keyed by member name; the page's `capture_background_image` points here.
-    pub blobs: std::collections::BTreeMap<String, Vec<u8>>,
+    /// Shared so cloning a document for undo or a drag copies refcounts, not megabytes.
+    pub blobs: std::collections::BTreeMap<String, std::sync::Arc<Vec<u8>>>,
     pub thumbnail_png: Option<Vec<u8>>,
     /// Where this document lives on disk, if saved.
     pub path: Option<std::path::PathBuf>,
@@ -599,7 +600,7 @@ impl Document {
             ..Default::default()
         };
         let mut blobs = std::collections::BTreeMap::new();
-        blobs.insert(member, png);
+        blobs.insert(member, std::sync::Arc::new(png));
         Document { metadata: Metadata::default(), pages: vec![page], blobs, thumbnail_png: None, path: None }
     }
     pub fn page(&self) -> &Page {
