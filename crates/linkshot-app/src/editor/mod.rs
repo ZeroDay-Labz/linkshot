@@ -698,7 +698,7 @@ fn caption_row(app: &mut App, ui: &mut egui::Ui, rect: Rect, ctx: &egui::Context
     });
     // title
     let title = app.editor.current_doc().map(|d| { let mut t = d.doc.display_name(); if d.is_dirty() { t.push('*'); } t }).unwrap_or_default();
-    ui.painter().text(Pos2::new(rect.center().x + 100.0, rect.center().y), Align2::CENTER_CENTER, format!("{title}  –  LinkShot Editor"), crate::theme::medium(12.5), pal.text);
+    ui.painter().text(Pos2::new(rect.center().x + 100.0, rect.center().y), Align2::CENTER_CENTER, if title.is_empty() { "LinkShot Editor".to_string() } else { format!("{title}  –  LinkShot Editor") }, crate::theme::medium(12.5), pal.text);
     // window buttons 46×28
     let mut x = rect.right() - 23.0;
     for (i, (draw, tip)) in [(icons::close_icon as fn(&egui::Painter, Rect, Color32), "Close"), (icons::maximize_icon as fn(&egui::Painter, Rect, Color32), "Maximize"), (icons::minimize_icon as fn(&egui::Painter, Rect, Color32), "Minimize")].iter().enumerate() {

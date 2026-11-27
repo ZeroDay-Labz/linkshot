@@ -38,9 +38,15 @@ pub fn tool_icon(p: &Painter, rect: Rect, tool: ToolMode, color: Color32) {
             let _ = p.add(egui::Shape::closed_line(pts, stroke(color, w)));
         }
         ToolMode::Fill => {
-            let bucket = Rect::from_center_size(c + Vec2::new(-s * 0.05, s * 0.05), Vec2::splat(s * 0.6));
-            p.rect_stroke(bucket.rotate_bb(egui::emath::Rot2::from_angle(0.6)), 0.0, stroke(color, w), egui::StrokeKind::Inside);
-            p.circle_filled(Pos2::new(r.right() - s * 0.12, r.bottom() - s * 0.15), s * 0.11, color);
+            // Tilted paint bucket (a square rotated about its own centre) with a drip.
+            let bc = c + Vec2::new(-s * 0.08, s * 0.02);
+            let rot = egui::emath::Rot2::from_angle(0.6);
+            let half = s * 0.28;
+            let corners: Vec<Pos2> = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)].iter().map(|(x, y)| bc + rot * Vec2::new(x * half, y * half)).collect();
+            let _ = p.add(egui::Shape::closed_line(corners.clone(), stroke(color, w)));
+            // Paint spilling over the top-right rim.
+            let _ = p.add(egui::Shape::convex_polygon(vec![corners[1], corners[2], corners[2] + Vec2::new(s * 0.12, s * 0.1)], color.gamma_multiply(0.7), Stroke::NONE));
+            p.circle_filled(Pos2::new(r.right() - s * 0.06, r.bottom() - s * 0.12), s * 0.11, color);
         }
         ToolMode::VectorSelection => {
             // mouse pointer

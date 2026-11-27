@@ -262,10 +262,12 @@ fn tool_properties(app: &mut App, ui: &mut egui::Ui, tool: ToolMode) {
             ui.label("End Style");
             ui.horizontal(|ui| {
                 ui.add_space(8.0);
-                egui::ComboBox::from_id_salt("arrow-start").width(104.0).selected_text(q.arrow_start.as_str()).show_ui(ui, |ui| { for e in ArrowLineEndType::ALL { changed |= ui.selectable_value(&mut q.arrow_start, *e, e.as_str()).changed(); } });
-                egui::ComboBox::from_id_salt("arrow-end").width(104.0).selected_text(q.arrow_end.as_str()).show_ui(ui, |ui| { for e in ArrowLineEndType::ALL { changed |= ui.selectable_value(&mut q.arrow_end, *e, e.as_str()).changed(); } });
+                // Two dropdowns side by side, sized to the panel (they used to overflow it).
+                let cw = ((ui.available_width() - ui.spacing().item_spacing.x - 28.0) / 2.0).clamp(70.0, 140.0);
+                egui::ComboBox::from_id_salt("arrow-start").width(cw).selected_text(human(q.arrow_start.as_str())).show_ui(ui, |ui| { for e in ArrowLineEndType::ALL { changed |= ui.selectable_value(&mut q.arrow_start, *e, human(e.as_str())).changed(); } });
+                egui::ComboBox::from_id_salt("arrow-end").width(cw).selected_text(human(q.arrow_end.as_str())).show_ui(ui, |ui| { for e in ArrowLineEndType::ALL { changed |= ui.selectable_value(&mut q.arrow_end, *e, human(e.as_str())).changed(); } });
             });
-            ui.horizontal(|ui| { ui.label("Line Style"); ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| { egui::ComboBox::from_id_salt("dash").selected_text(q.dash_type.as_str()).show_ui(ui, |ui| { for d in DashType::ALL { changed |= ui.selectable_value(&mut q.dash_type, *d, d.as_str()).changed(); } }); }); });
+            ui.horizontal(|ui| { ui.label("Line Style"); ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| { egui::ComboBox::from_id_salt("dash").selected_text(human(q.dash_type.as_str())).show_ui(ui, |ui| { for d in DashType::ALL { changed |= ui.selectable_value(&mut q.dash_type, *d, human(d.as_str())).changed(); } }); }); });
             changed |= slider_row(ui, "Width", &mut q.stroke_width, 1.0..=60.0, " px");
             changed |= slider_row(ui, "Opacity", &mut q.opacity, 0.0..=100.0, "%");
             changed |= slider_row(ui, "Start/End Size", &mut q.arrow_end_width, 0.5..=8.0, "");
@@ -524,4 +526,13 @@ pub fn cut_out_parts(style: CutOutType) -> (bool, String) {
 
 pub fn cut_out_style(horizontal: bool, edge: &str) -> CutOutType {
     format!("{}{}CutOut", if horizontal { "Horz" } else { "Vert" }, edge).parse().unwrap_or_default()
+}
+
+/// Display text for a file-format key: `RoundedArrow` → `Rounded arrow`.
+fn human(key: &str) -> String {
+    let mut out = String::with_capacity(key.len() + 4);
+    for (i, ch) in key.chars().enumerate() {
+        if i > 0 && ch.is_uppercase() { out.push(' '); out.extend(ch.to_lowercase()); } else { out.push(ch); }
+    }
+    out
 }

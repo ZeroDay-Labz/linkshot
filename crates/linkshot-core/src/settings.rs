@@ -223,7 +223,7 @@ impl Default for Settings {
             hotkey_video_stop: HotKey { key: "F10".into(), shift: true, ..Default::default() },
             hotkey_draw_mode: HotKey { key: "D".into(), ctrl: true, shift: true, ..Default::default() },
             hotkey_mute_mic: HotKey { key: "M".into(), ctrl: true, shift: true, ..Default::default() },
-            editor_workspace_color: crate::Argb::rgb(0x1C, 0x19, 0x15),
+            editor_workspace_color: WORKSPACE_DEFAULT,
             tray_thumbnail_size: TrayThumbnailSize::Medium,
             auto_expand_canvas: true,
             escape_closes_editor: false,
@@ -335,6 +335,9 @@ pub fn keep_broken(path: &Path, error: &str) {
     let _ = std::fs::rename(path, &aside);
 }
 
+/// Default editor workspace colour: a cool near-black a step darker than the dark panels.
+pub const WORKSPACE_DEFAULT: crate::Argb = crate::Argb::rgb(0x12, 0x15, 0x19);
+
 impl Settings {
     pub fn load(path: &Path) -> Settings {
         let mut s: Settings = match std::fs::read(path) {
@@ -342,6 +345,9 @@ impl Settings {
             Err(_) => Settings::default(),
         };
         if s.theme_generation < 2 { s.ui_theme = UiTheme::Dark; s.theme_generation = 2; }
+        // The old default workspace was warm brown-black, out of tune with the cool panels; users
+        // who never picked a colour get the new default.
+        if s.editor_workspace_color == crate::Argb::rgb(0x1C, 0x19, 0x15) { s.editor_workspace_color = WORKSPACE_DEFAULT; }
         s
     }
     pub fn save(&self, path: &Path) -> anyhow::Result<()> {

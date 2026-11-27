@@ -82,14 +82,16 @@ pub fn panel_header(ui: &mut Ui, p: &Palette, text: &str, right: impl FnOnce(&mu
     let rect = Rect::from_min_size(rect.min, Vec2::new(rect.width(), h));
     ui.painter().rect_filled(rect, 0.0, p.dark_panel);
     ui.painter().hline(rect.x_range(), rect.bottom() - 0.5, Stroke::new(1.0_f32, p.separator));
-    ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+    let used = ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
         ui.horizontal_centered(|ui| {
             ui.add_space(10.0);
             ui.label(egui::RichText::new(text).family(egui::FontFamily::Name(crate::theme::FONT_SEMIBOLD.into())).color(p.text_bright).size(12.5));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| { ui.add_space(6.0); right(ui); });
         });
-    });
-    ui.add_space(h);
+    }).response.rect;
+    // The scope already took up its own height; only make up what is missing of the header row.
+    let missing = rect.bottom() - used.bottom();
+    if missing > 0.0 { ui.add_space(missing); }
 }
 
 pub fn separator_h(ui: &mut Ui, p: &Palette) {

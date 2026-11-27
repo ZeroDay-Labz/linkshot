@@ -116,7 +116,7 @@ impl ScrollingUi {
 
             // Status text on the left.
             let (title, sub) = if self.finishing {
-                ("Stitching…".to_string(), format!("{} frames", self.accepted))
+                ("Stitching…".to_string(), format!("{} px", self.length))
             } else if !self.started {
                 ("Ready to capture".to_string(), "Press Start, then scroll the content".to_string())
             } else if self.misses >= 4 {
@@ -160,11 +160,13 @@ impl ScrollingUi {
         ctx.request_repaint_after(std::time::Duration::from_millis(80));
     }
 
+    /// Stitched size so far. (Not a frame count: the stitcher drops frames its neighbours cover,
+    /// so that number would go down while the capture grows.)
     fn progress_text(accepted: usize, length: u32, axis: Option<Axis>) -> String {
         match axis {
-            Some(Axis::Horizontal) => format!("{accepted} frames · {length} px wide"),
-            _ if accepted > 1 => format!("{accepted} frames · {length} px tall"),
-            _ => format!("{accepted} frame"),
+            Some(Axis::Horizontal) => format!("{length} px wide so far"),
+            _ if accepted > 1 => format!("{length} px tall so far"),
+            _ => "Waiting for the content to scroll".to_string(),
         }
     }
 }

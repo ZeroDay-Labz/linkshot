@@ -100,6 +100,10 @@ pub fn tray_ui(app: &mut App, ui: &mut egui::Ui, rect: Rect, ctx: &egui::Context
                 icons::library_icon(ui.painter(), Rect::from_center_size(Pos2::new(lr.left() + 20.0, lr.center().y), Vec2::splat(18.0)), pal.text_bright);
                 ui.painter().text(Pos2::new(lr.left() + 38.0, lr.center().y), Align2::LEFT_CENTER, "Library", FontId::proportional(14.0), pal.text_bright);
                 if lresp.on_hover_text("Switch to Library").clicked() { app.editor.library_view = !app.editor.library_view; if app.editor.library_view && !app.editor.library_scanned { let dir = app.settings.library_dir(&app.paths); app.editor.start_library_scan(dir); } }
+                if app.editor.docs.is_empty() {
+                    ui.add_space(16.0);
+                    ui.label(egui::RichText::new("Your recent captures will appear here").color(pal.text.gamma_multiply(0.55)));
+                }
             });
         });
     });
