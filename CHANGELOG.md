@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.5.1 — 2026-11-27
+
+- **Print Screen works again on Wayland.** Outside the Flatpak, LinkShot identified itself to the
+  desktop as `linkshot`, which the GlobalShortcuts portal rejects ("An app id is required") when
+  LinkShot is started from a terminal, an IDE or the autostart entry. Every build now uses the id
+  `io.github.zerodaylabz.LinkShot` (desktop file, window id, autostart entry, shortcut component) and
+  registers it with the portal at startup. Old `linkshot.desktop` files and bindings are migrated.
+- **Print Screen repairs itself.** When LinkShot was made the screenshot tool but the binding has gone
+  missing or is held by a stale entry (after a reinstall, or switching between the Flatpak and the
+  package), it is bound again at startup.
+- Global shortcut sessions are closed when the hotkeys change instead of piling up; shortcut errors
+  are shown next to the hotkey settings.
+- **Scrolling capture memory.** Frames whose content is fully shown by their neighbours are dropped
+  as the capture goes, so a long smooth-scrolled page keeps a few dozen frames instead of hundreds
+  (gigabytes at 1080p). The stitched result is unchanged. The HUD shows the stitched length.
+- **Editor polish:** cool dark workspace matching the panels, a proper Fill tool icon, no empty band
+  under panel headers, readable arrow-end and line-style names that fit the panel, a clean window
+  title and an empty-state hint in the recent captures tray.
+
 ## 0.5.0 — 2026-10-20
 
 - **Live capture overlay.** The selection overlay no longer takes a screenshot of every monitor and
