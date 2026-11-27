@@ -110,6 +110,10 @@ pub struct EditorState {
     pub gif_dialog: Option<video_view::GifDialog>,
     /// Running GIF/MP4 exports, oldest first (several may run at once).
     pub export_jobs: Vec<video_view::ExportJob>,
+    /// Running uploads (Imgur, Nextcloud).
+    pub uploads: Vec<crate::uploads::UploadJob>,
+    pub nextcloud_login: Option<crate::uploads::NextcloudLogin>,
+    pub nextcloud_error: Option<String>,
     /// Wakes the UI loop from worker threads (players, exports).
     pub wake: std::sync::Arc<dyn Fn() + Send + Sync>,
 }
@@ -167,6 +171,9 @@ impl EditorState {
             tray_dirty: false,
             gif_dialog: None,
             export_jobs: Vec::new(),
+            uploads: Vec::new(),
+            nextcloud_login: None,
+            nextcloud_error: None,
             wake: std::sync::Arc::new(|| {}),
         }
     }
@@ -363,6 +370,19 @@ impl EditorState {
                         Err(e) => self.set_status(format!("Print failed: {e:#}")),
                     }
                 }
+                output_ids::IMGUR | output_ids::NEXTCLOUD => {
+                    // A saved GIF/MP4 goes up as it is; anything else as a PNG of the image.
+                    let file = doc.path.clone().filter(|p| matches!(p.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).as_deref(), Some("gif" | "mp4")));
+                    let res = match file {
+                        Some(p) => std::fs::read(&p).map(|b| (b, p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "capture".into()))).map_err(anyhow::Error::from),
+                        None => crate::share::temp_png(&mut self.renderer, doc, &paths.cache_dir.join("share"), &doc.display_name())
+                            .and_then(|p| Ok((std::fs::read(&p)?, p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "capture.png".into())))),
+                    };
+                    match res {
+                        Ok((bytes, name)) => { let job = crate::uploads::start(&id, bytes, name, app_settings, self.wake.clone()); self.set_status(job.label.clone()); self.uploads.push(job); }
+                        Err(e) => self.set_status(format!("Upload failed: {e:#}")),
+                    }
+                }
                 other => { self.set_status(format!("Share destination {} is not available yet.", output_ids::title(other))); }
             }
         }
@@ -547,6 +567,8 @@ pub fn editor_ui(app: &mut App, ctx: &egui::Context, actions: &mut Vec<Action>) 
     dialogs(app, ctx, actions);
     video_view::gif_dialog_ui(app, ctx);
     video_view::poll_export(app, ctx);
+    crate::uploads::poll(app);
+    if !app.editor.uploads.is_empty() { ctx.request_repaint_after(std::time::Duration::from_millis(250)); }
 }
 
 /// Save As (Ctrl+Shift+S, menus): images through the format dialog, videos through GIF/MP4 export.
@@ -801,7 +823,7 @@ fn editor_menu(app: &mut App, ui: &mut egui::Ui, ctx: &egui::Context, actions: &
         ui.label(egui::RichText::new(format!("Default format: {}  (Preferences ▸ Video)", app.settings.default_video_format)).small());
     });
     ui.menu_button("Share", |ui| {
-        for id in app.settings.enabled_outputs.clone() {
+        for id in share_menu_ids(&app.settings) {
             if ui.button(output_ids::title(&id)).clicked() {
                 if let Some(i) = app.editor.current {
                     let mut s = CaptureSettings::default();
@@ -896,7 +918,7 @@ fn top_panel(app: &mut App, ui: &mut egui::Ui, rect: Rect, actions: &mut Vec<Act
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let share = widgets::dropdown_button(ui, &pal, "Share", true, 0.0).on_hover_text("Share to a specific app or save to your computer");
             egui::Popup::menu(&share).show(|ui| {
-                for id in app.settings.enabled_outputs.clone() {
+                for id in share_menu_ids(&app.settings) {
                     if ui.button(output_ids::title(&id)).clicked() {
                         if let Some(i) = app.editor.current {
                             let mut s = CaptureSettings::default();
@@ -1281,6 +1303,13 @@ fn dialogs(app: &mut App, ctx: &egui::Context, actions: &mut Vec<Action>) {
     if app.show_prefs { preferences_window(app, ctx, actions); }
 }
 
+/// Destinations offered in the Share menus: the enabled ones that work, plus LinkShot's own.
+pub fn share_menu_ids(s: &Settings) -> Vec<String> {
+    let mut ids: Vec<String> = s.enabled_outputs.iter().filter(|id| id.as_str() != output_ids::FTP).cloned().collect();
+    for id in output_ids::BUILT_IN { if !ids.iter().any(|x| x == id) { ids.push(id.to_string()); } }
+    ids
+}
+
 fn preferences_window(app: &mut App, ctx: &egui::Context, _actions: &mut Vec<Action>) {
     let mut default_tool_action: Option<bool> = None;
     let mut open = true;
@@ -1395,6 +1424,8 @@ fn preferences_window(app: &mut App, ctx: &egui::Context, _actions: &mut Vec<Act
             changed |= ui.checkbox(&mut s.auto_flatten_paste, "Automatically flatten pasted images").changed();
             if ui.button("Reset to Default Settings").clicked() { *s = Settings::default(); changed = true; theme_changed = true; }
         });
+        // Last: it needs the whole app (login state, status line), not just the settings.
+        ui.collapsing("Sharing accounts", |ui| { changed |= crate::uploads::accounts_ui(app, ui); });
     });
     if theme_changed { app.apply_theme(ctx); changed = true; let _ = linkshot_platform::autostart::set_enabled(app.settings.run_at_startup); }
     if changed { app.mark_settings_dirty(); let _ = linkshot_platform::autostart::set_enabled(app.settings.run_at_startup); }

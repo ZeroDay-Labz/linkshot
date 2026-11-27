@@ -57,6 +57,18 @@ impl VideoQuality {
     pub fn fps(self) -> u32 { match self { VideoQuality::Low => 10, VideoQuality::Medium => 20, VideoQuality::High => 30 } }
 }
 
+/// One finished upload.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UploadRecord {
+    pub service: String,
+    pub url: String,
+    pub delete_url: Option<String>,
+    pub file_name: String,
+    /// Unix time in seconds.
+    pub when: i64,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -80,6 +92,15 @@ pub struct Settings {
     pub last_update_check: i64,
     /// A release the user chose to skip ("v0.6.0"); automatic checks do not offer it again.
     pub skipped_update: String,
+    /// Nextcloud upload account (the app password is in the system keyring, not here).
+    pub nextcloud_server: String,
+    pub nextcloud_user: String,
+    pub nextcloud_folder: String,
+    pub nextcloud_public_link: bool,
+    /// Imgur application id for anonymous uploads; empty uses the one built into release packages.
+    pub imgur_client_id: String,
+    /// Recent uploads, newest first (links and delete links), at most 50.
+    pub upload_history: Vec<UploadRecord>,
     pub capture_interface: CaptureInterface,
     pub auto_check_updates: bool,
     pub show_onboarding: bool,
@@ -197,6 +218,12 @@ impl Default for Settings {
             check_updates_on_start: false,
             last_update_check: 0,
             skipped_update: String::new(),
+            nextcloud_server: String::new(),
+            nextcloud_user: String::new(),
+            nextcloud_folder: "LinkShot".into(),
+            nextcloud_public_link: true,
+            imgur_client_id: String::new(),
+            upload_history: Vec::new(),
             ui_scale: 1.0,
             capture_interface: CaptureInterface::CaptureWindow,
             auto_check_updates: false,

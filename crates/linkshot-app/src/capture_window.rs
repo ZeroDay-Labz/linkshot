@@ -427,7 +427,7 @@ impl App {
         let label = ids.iter().map(|d| output_ids::title(d)).collect::<Vec<_>>().join(", ");
         let resp = widgets::combo_header(ui, &pal, if label.is_empty() { "None" } else { &label }, width);
         let mut pick: Option<String> = None;
-        let enabled = self.settings.enabled_outputs.clone();
+        let enabled = crate::editor::share_menu_ids(&self.settings);
         crate::widgets::popup(&resp, false, egui::PopupCloseBehavior::CloseOnClick, |ui| {
             ui.set_min_width(width);
             if ui.selectable_label(ids == vec![output_ids::NONE.to_string()], "None").clicked() { pick = Some(output_ids::NONE.into()); }

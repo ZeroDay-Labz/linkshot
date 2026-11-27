@@ -54,6 +54,7 @@ mod single_instance;
 mod theme;
 mod tray_icon;
 mod updates;
+mod uploads;
 mod widgets;
 
 fn main() -> eframe::Result<()> {

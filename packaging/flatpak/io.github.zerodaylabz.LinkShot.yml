@@ -34,6 +34,8 @@ finish-args:
   - --talk-name=org.freedesktop.Notifications
   # Automatic scrolling through the accessibility bus (falls back to wheel events without it)
   - --talk-name=org.a11y.Bus
+  # Nextcloud app password in the system keyring
+  - --talk-name=org.freedesktop.secrets
   - --env=RUST_LOG=linkshot=info,warn
 build-options:
   append-path: /usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/llvm20/bin

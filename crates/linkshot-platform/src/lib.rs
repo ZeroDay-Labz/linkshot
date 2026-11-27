@@ -106,6 +106,7 @@ pub fn reveal(path: &std::path::Path) -> Result<()> {
 
 pub mod default_tool;
 pub mod update;
+pub mod upload;
 
 pub mod autostart {
     //! "Run linkshot when the system starts".

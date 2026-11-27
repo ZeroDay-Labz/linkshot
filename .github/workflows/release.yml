@@ -13,6 +13,8 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # Imgur application id for anonymous uploads, compiled into the packages (empty: users enter their own).
+  LINKSHOT_IMGUR_CLIENT_ID: ${{ secrets.IMGUR_CLIENT_ID }}
 
 jobs:
   bundles:
@@ -121,6 +123,10 @@ jobs:
       # link"). Copying the installation into the writable layer first avoids that.
       - name: Make the Flatpak installation writable
         run: cp -a /var/lib/flatpak /var/lib/flatpak.rw && rm -rf /var/lib/flatpak && mv /var/lib/flatpak.rw /var/lib/flatpak
+      # flatpak-builder does not pass the job's environment into the build.
+      - name: Imgur client id
+        if: env.LINKSHOT_IMGUR_CLIENT_ID != ''
+        run: sed -i "s|^    CARGO_HOME:|    LINKSHOT_IMGUR_CLIENT_ID: \"$LINKSHOT_IMGUR_CLIENT_ID\"\n    CARGO_HOME:|" packaging/flatpak/io.github.zerodaylabz.LinkShot.yml
       - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
           manifest-path: packaging/flatpak/io.github.zerodaylabz.LinkShot.yml

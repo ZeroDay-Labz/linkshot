@@ -261,6 +261,11 @@ pub mod output_ids {
     pub const TWITTER: &str = "{2485098E-1ACB-4f7c-9D6D-F207A433AC60}";
     pub const SHAREPOINT: &str = "{E2C1FC77-AE27-4E50-A61E-636C478AF6DA}";
     pub const TEAMS: &str = "{5147F54B-C590-4666-9EC4-DBAF293C9061}";
+    /// Destinations of LinkShot's own (not in imported preset files).
+    pub const IMGUR: &str = "linkshot-imgur";
+    pub const NEXTCLOUD: &str = "linkshot-nextcloud";
+    /// Destinations the share menus always offer, whatever `enabled_outputs` says.
+    pub const BUILT_IN: &[&str] = &[FILE, CLIPBOARD, EMAIL, PROGRAM, IMGUR, NEXTCLOUD];
 
     pub fn title(id: &str) -> &'static str {
         match id {
@@ -269,6 +274,7 @@ pub mod output_ids {
             CAMTASIA => "Camtasia", SCREENCAST => "Screencast", YOUTUBE => "YouTube", GOOGLE_DRIVE => "Google Drive",
             DROPBOX => "Dropbox", SLACK => "Slack", BOX => "Box", ONEDRIVE => "OneDrive", ONENOTE => "OneNote",
             EVERNOTE => "Evernote", TWITTER => "X", SHAREPOINT => "SharePoint", TEAMS => "Microsoft Teams",
+            IMGUR => "Imgur", NEXTCLOUD => "Nextcloud",
             _ => "Unknown",
         }
     }

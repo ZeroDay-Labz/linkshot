@@ -22,6 +22,18 @@ ureq = { version = "3", default-features = false, features = ["rustls"] }
 serde_json = "1"
 semver = "1"
 sha2 = "0.10"
+base64 = "0.22"
+
+# Upload account passwords live in the system keyring (Secret Service / Windows Credential Manager).
+[target.'cfg(target_os = "linux")'.dependencies.keyring]
+version = "3"
+default-features = false
+features = ["async-secret-service", "async-io", "crypto-rust"]
+
+[target.'cfg(windows)'.dependencies.keyring]
+version = "3"
+default-features = false
+features = ["windows-native"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
