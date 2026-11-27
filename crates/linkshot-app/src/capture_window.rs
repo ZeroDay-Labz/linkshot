@@ -86,8 +86,7 @@ impl App {
             let title = Rect::from_min_size(win.min, Vec2::new(win.width(), TITLE_H));
             ui.painter().rect_filled(title, egui::CornerRadius { nw: 10, ne: 10, sw: 0, se: 0 }, pal.product);
             ui.painter().rect_filled(Rect::from_min_max(Pos2::new(title.left(), title.bottom() - 1.0), title.max), 0.0, pal.product_dark);
-            let drag = ui.interact(title, ui.id().with("title-drag"), Sense::click_and_drag());
-            if drag.drag_started() { ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag); }
+            crate::widgets::title_bar_drag(ui, title, ui.id().with("title-drag"), false);
             // app glyph
             icons::all_in_one_icon(ui.painter(), Rect::from_center_size(Pos2::new(title.left() + 22.0, title.center().y), Vec2::splat(16.0)), Color32::WHITE);
             // menu bar

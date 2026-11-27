@@ -170,9 +170,8 @@ impl Updater {
                 let painter = ui.painter().clone();
                 painter.rect_filled(r, 12.0, pal.dark_panel);
                 painter.rect_stroke(r, 12.0, Stroke::new(1.0_f32, pal.control_outline), egui::StrokeKind::Inside);
-                // Drag anywhere on the background to move the window.
-                let bg = ui.interact(r, ui.id().with("update-drag"), egui::Sense::drag());
-                if bg.drag_started() { ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag); }
+                // Press anywhere on the background to move the window (the buttons, drawn later, keep their clicks).
+                crate::widgets::title_bar_drag(ui, r, ui.id().with("update-drag"), false);
                 // Icon: a circle with an arrow pointing down.
                 let ic = Pos2::new(r.left() + 30.0, r.top() + 34.0);
                 let accent = match &state { State::Failed(..) => pal.capture_red, State::Installed(_) | State::UpToDate => pal.green, _ => pal.product_bright };

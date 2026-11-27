@@ -45,15 +45,21 @@ uuid.workspace = true
 base64.workspace = true
 parking_lot.workspace = true
 crossbeam-channel.workspace = true
-eframe = { version = "0.33", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
+eframe = { version = "0.33", default-features = false, features = ["default_fonts", "glow", "wgpu", "wayland", "x11"] }
 egui = "0.33"
 rfd = "0.15"
 global-hotkey = { version = "0.7", optional = true }
+
+[target.'cfg(windows)'.dependencies]
+wgpu = { version = "27", default-features = false, features = ["dx12", "wgsl", "std"] }
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 tray-icon = { version = "0.21", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
+# GPU backend for eframe's wgpu renderer (eframe enables none with default features off).
+# Vulkan first (NVIDIA proprietary, AMD/Intel Mesa); OpenGL ES where Vulkan is missing (old GPUs, VMs).
+wgpu = { version = "27", default-features = false, features = ["vulkan", "gles", "wgsl", "std"] }
 # StatusNotifierItem tray (left-click Activate works, unlike libappindicator).
 ksni = { version = "0.3", default-features = false, features = ["async-io", "blocking"], optional = true }
 ashpd = { version = "0.13", default-features = false, features = ["async-io", "global_shortcuts"] }
@@ -73,7 +79,7 @@ image editor. Ships with its own ffmpeg and Tesseract so nothing else has to be 
 section = "graphics"
 priority = "optional"
 depends = "libc6 (>= 2.34), libgcc-s1, libxcb1, libxau6, libgbm1, libdrm2, libexpat1, libxkbcommon0, libwayland-client0, libegl1, libgl1"
-recommends = "xdg-desktop-portal, libgtk-3-0"
+recommends = "xdg-desktop-portal, libgtk-3-0, libvulkan1, mesa-vulkan-drivers"
 assets = [
     ["target/release/linkshot", "usr/bin/", "755"],
     ["../../packaging/third-party/bundle/linux/**/*", "usr/lib/linkshot/", "755"],
@@ -117,6 +123,10 @@ assets = [
     { source = "LICENSE-MIT", dest = "/usr/share/licenses/linkshot/LICENSE-MIT", mode = "644" },
     { source = "LICENSE-APACHE", dest = "/usr/share/licenses/linkshot/LICENSE-APACHE", mode = "644" },
 ]
+
+[package.metadata.generate-rpm.recommends]
+# The wgpu renderer uses Vulkan when the loader is present (OpenGL otherwise).
+vulkan-loader = "*"
 
 [package.metadata.generate-rpm.requires]
 glibc = "*"

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.6.0 — 2026-11-27
+
+- **Check for Updates.** Help ▸ Check for Updates… (Capture window, Editor and tray menu) looks for
+  a newer release on GitHub; Preferences can also check when LinkShot starts (off by default, at most
+  once a day). Nothing contacts GitHub otherwise. A small window shows what is new and installs the
+  update straight from the release: the package matching your installation is downloaded, checked
+  against the release's SHA256SUMS.txt, and installed with your system's tool (dnf/rpm or apt behind
+  the password prompt, Flatpak, or by replacing the Windows executable), then LinkShot restarts.
+  Skip This Version keeps automatic checks quiet until the next release.
+- **Smooth across monitors with different scaling.** LinkShot now draws with wgpu (Vulkan on NVIDIA,
+  AMD and Intel; OpenGL ES where Vulkan is missing; DirectX 12 on Windows). The OpenGL renderer left
+  trails and cut-off windows when a window moved between, say, a 4K monitor at 170 % and a 1080p one;
+  it remains as an automatic fallback (or `LINKSHOT_RENDERER=glow`).
+- **Title bars move the window on the first press**, like native ones (double-click still maximises
+  the Editor). Before, the first press-and-drag on an inactive window was often lost.
+- Buttons in the update window react to the first click.
+
 ## 0.5.3 — 2026-11-27
 
 - **Print Screen works on KDE Plasma.** The key used to be bound to an action of LinkShot's desktop

@@ -110,7 +110,7 @@ fn main() -> eframe::Result<()> {
     // The root window is a tiny invisible controller (see `keepalive.rs`); the Capture window,
     // the Editor and the overlays are child viewports. Minimising or hiding any of them therefore
     // never stops the event loop that handles hotkeys, tray clicks and timers.
-    let options = eframe::NativeOptions {
+    let options = |renderer: eframe::Renderer| eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title(keepalive::TITLE)
             .with_app_id(crate::app_id())
@@ -128,7 +128,18 @@ fn main() -> eframe::Result<()> {
         // window never receives one, which would hang the UI thread. egui repaints only on demand,
         // so nothing is lost.
         vsync: false,
+        renderer,
         ..Default::default()
     };
-    eframe::run_native("LinkShot", options, Box::new(move |cc| Ok(Box::new(app::App::new(cc, background || capture, capture)))))
+    // Renderer: wgpu (Vulkan, or OpenGL ES where Vulkan is missing) handles windows that move between
+    // monitors with different scale factors cleanly; the glow (OpenGL) renderer left stale frames and
+    // trails there. If wgpu cannot start on this machine, fall back to glow rather than not starting.
+    // LINKSHOT_RENDERER=glow forces the OpenGL renderer.
+    let force_glow = std::env::var("LINKSHOT_RENDERER").as_deref() == Ok("glow");
+    let start = |renderer| eframe::run_native("LinkShot", options(renderer), Box::new(move |cc| Ok(Box::new(app::App::new(cc, background || capture, capture)))));
+    if force_glow { return start(eframe::Renderer::Glow); }
+    match start(eframe::Renderer::Wgpu) {
+        Err(e) => { tracing::warn!("wgpu renderer failed ({e}); falling back to OpenGL"); start(eframe::Renderer::Glow) }
+        ok => ok,
+    }
 }

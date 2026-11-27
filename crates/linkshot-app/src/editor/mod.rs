@@ -686,9 +686,7 @@ fn resize_edges(ui: &mut egui::Ui, ctx: &egui::Context, full: Rect) {
 fn caption_row(app: &mut App, ui: &mut egui::Ui, rect: Rect, ctx: &egui::Context, actions: &mut Vec<Action>) {
     let pal = app.pal;
     ui.painter().rect_filled(rect, 0.0, pal.main_panel);
-    let drag = ui.interact(Rect::from_min_max(Pos2::new(rect.left() + 420.0, rect.top()), Pos2::new(rect.right() - 150.0, rect.bottom())), ui.id().with("caption-drag"), Sense::click_and_drag());
-    if drag.drag_started() { ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag); }
-    if drag.double_clicked() { let max = ctx.input(|i| i.viewport().maximized.unwrap_or(false)); ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!max)); }
+    crate::widgets::title_bar_drag(ui, Rect::from_min_max(Pos2::new(rect.left() + 420.0, rect.top()), Pos2::new(rect.right() - 150.0, rect.bottom())), ui.id().with("caption-drag"), true);
     icons::all_in_one_icon(ui.painter(), Rect::from_center_size(Pos2::new(rect.left() + 16.0, rect.center().y), Vec2::splat(14.0)), pal.product);
     ui.scope_builder(egui::UiBuilder::new().max_rect(Rect::from_min_max(Pos2::new(rect.left() + 30.0, rect.top()), Pos2::new(rect.left() + 420.0, rect.bottom()))), |ui| {
         ui.horizontal_centered(|ui| {

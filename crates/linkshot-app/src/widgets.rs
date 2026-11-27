@@ -188,3 +188,26 @@ pub fn print_screen_chip(ui: &mut Ui, p: &Palette, field: Rect, id: egui::Id) ->
     ui.painter().text(chip.center(), egui::Align2::CENTER_CENTER, "PrtSc", egui::FontId::proportional(10.5), Color32::WHITE);
     r.clicked()
 }
+
+/// A custom title bar's move handle. The move starts on the mouse *press*, as with a native title
+/// bar: waiting for egui's drag threshold needed the window to repaint on pointer motion first, which
+/// an inactive secondary window may not do, so the first press-and-drag was often lost. Widgets
+/// placed on top of `rect` (menus, window buttons) still get their own presses, because egui gives
+/// a press to the topmost widget only. A second press within 350 ms toggles maximise when
+/// `maximize` is set.
+pub fn title_bar_drag(ui: &mut Ui, rect: Rect, id: egui::Id, maximize: bool) {
+    let resp = ui.interact(rect, id, Sense::click());
+    let pressed = ui.input(|i| i.pointer.primary_pressed());
+    if !(pressed && resp.is_pointer_button_down_on()) { return; }
+    let ctx = ui.ctx().clone();
+    let now = ui.input(|i| i.time);
+    let last: f64 = ctx.data(|d| d.get_temp(id).unwrap_or(f64::NEG_INFINITY));
+    if maximize && now - last < 0.35 {
+        ctx.data_mut(|d| d.insert_temp(id, f64::NEG_INFINITY));
+        let max = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!max));
+    } else {
+        ctx.data_mut(|d| d.insert_temp(id, now));
+        ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+    }
+}

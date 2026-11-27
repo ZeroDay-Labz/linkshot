@@ -863,6 +863,19 @@ impl eframe::App for App {
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         tracing::trace!("update pass {}", ctx.cumulative_pass_nr());
+        // LINKSHOT_FRAME_LOG=1: log how long the UI loop went without running while a window was
+        // shown and input was arriving (responsiveness diagnostics).
+        if std::env::var_os("LINKSHOT_FRAME_LOG").is_some() {
+            static LAST: std::sync::Mutex<Option<Instant>> = std::sync::Mutex::new(None);
+            let now = Instant::now();
+            let mut last = LAST.lock().unwrap();
+            if let Some(prev) = *last {
+                let gap = now - prev;
+                let events = ctx.input(|i| i.events.len());
+                if gap > Duration::from_millis(40) && (self.editor_visible || self.capture_visible) { tracing::info!("frame gap {} ms (root events {events})", gap.as_millis()); }
+            }
+            *last = Some(now);
+        }
         #[cfg(target_os = "linux")]
         if let Some(t) = linkshot_capture::screencast::take_new_tokens() { self.settings.screencast_token = t.plain; self.settings.screencast_token_cursor = t.cursor; self.mark_settings_dirty(); }
         self.poll_events(ctx);
