@@ -261,9 +261,19 @@ impl App {
         let fill = if editing { pal.input_primary } else if resp.hovered() { pal.control_bright } else { pal.control };
         ui.painter().rect_filled(rect, 11.0, fill);
         ui.painter().rect_stroke(rect, 11.0, Stroke::new(1.0_f32, if editing { pal.product_bright } else { pal.control_outline }), egui::StrokeKind::Inside);
-        let text = if editing { if key == "global" { "Press keys… (Home: Print Screen)".to_string() } else { "Press keys…".to_string() } } else { current.display() };
-        ui.painter().text(rect.center(), Align2::CENTER_CENTER, text, FontId::proportional(12.0), if current.is_none() && !editing { pal.input_secondary } else { pal.text });
+        let text = if editing { (if rect.width() < 160.0 { "Keys…" } else { "Press keys…" }).to_string() } else { current.display() };
+        let text_pos = if editing { Pos2::new(rect.left() + (rect.width() - 46.0) / 2.0, rect.center().y) } else { rect.center() };
+        ui.painter().text(text_pos, Align2::CENTER_CENTER, text, FontId::proportional(12.0), if current.is_none() && !editing { pal.input_secondary } else { pal.text });
+        // Print Screen never reaches the window as a key press (the toolkit has no such key, and the
+        // desktop usually grabs it), so it is offered as a chip while the field listens.
+        let prtsc = if editing { crate::widgets::print_screen_chip(ui, &pal, rect, ui.id().with(("hk-prtsc", key))) } else { false };
         if resp.clicked() { self.capture.editing_hotkey_for = if editing { None } else { Some(key.to_string()) }; }
+        if prtsc {
+            let mods = ui.ctx().input(|i| i.modifiers);
+            self.set_hotkey(key, HotKey { key: "PrintScreen".into(), ctrl: mods.ctrl, alt: mods.alt, shift: mods.shift, win: mods.command && !mods.ctrl });
+            self.capture.editing_hotkey_for = None;
+            return;
+        }
         if editing {
             let (keys, mods) = ui.ctx().input(|i| (i.keys_down.clone(), i.modifiers));
             if ui.ctx().input(|i| i.key_pressed(egui::Key::Escape)) { self.capture.editing_hotkey_for = None; return; }
@@ -291,11 +301,20 @@ impl App {
                     break;
                 }
             }
-            if resp.clicked_elsewhere() { self.capture.editing_hotkey_for = None; }
+            if resp.clicked_elsewhere() && !prtsc { self.capture.editing_hotkey_for = None; }
         }
     }
 
     fn set_hotkey(&mut self, key: &str, hk: HotKey) {
+        // Plain Print Screen as the capture key only works when the desktop hands the key to LinkShot
+        // (KDE/GNOME bind it to their own screenshot tool): take it over system-wide.
+        let plain_print = matches!(hk.key.as_str(), "PrintScreen" | "Snapshot") && !(hk.ctrl || hk.alt || hk.shift || hk.win);
+        if key == "global" && plain_print && cfg!(target_os = "linux") && !self.settings.system_print_screen && linkshot_platform::default_tool::supported() {
+            self.presets.global_hot_key = hk;
+            self.mark_presets_dirty();
+            self.make_default_tool();
+            return;
+        }
         if key == "global" { self.presets.global_hot_key = hk; } else if let Some(p) = self.presets.presets.iter_mut().find(|p| p.id == key) { p.hot_key = hk; }
         self.mark_presets_dirty();
         self.register_hotkeys();

@@ -92,6 +92,42 @@ fn grab_settled(region: Rect, max: Duration) -> Result<RgbaImage> {
     Ok(last)
 }
 
+/// Lazy-loading pages show an empty placeholder where new content is about to appear. When the
+/// part of the view that scrolling just revealed (the bottom quarter, above any sticky footer) is
+/// blank, re-grab for a little while until something appears. Returns the newest frame.
+fn wait_for_lazy_content(region: Rect, frame: RgbaImage, footer: usize) -> RgbaImage {
+    if !bottom_band_blank(&frame, footer) { return frame; }
+    let t0 = Instant::now();
+    let mut last = frame;
+    while t0.elapsed() < Duration::from_millis(1500) {
+        std::thread::sleep(Duration::from_millis(150));
+        let Ok(next) = grab(region) else { break };
+        let blank = bottom_band_blank(&next, footer);
+        last = next;
+        if !blank { return grab_settled(region, Duration::from_millis(600)).unwrap_or(last); }
+    }
+    last
+}
+
+/// True when every row of the bottom quarter (above `footer` rows) has (almost) no contrast.
+fn bottom_band_blank(img: &RgbaImage, footer: usize) -> bool {
+    let (w, h) = (img.width() as usize, img.height() as usize);
+    if w < 16 || h < 32 || footer >= h / 2 { return false; }
+    let y1 = h - footer;
+    let y0 = y1.saturating_sub(h / 4);
+    let (x0, x1) = (w * 2 / 100, w * 94 / 100);
+    let raw = img.as_raw();
+    (y0..y1).all(|y| {
+        let (mut lo, mut hi) = (255u8, 0u8);
+        for x in x0..x1 {
+            let i = (y * w + x) * 4;
+            let v = ((raw[i] as u32 * 77 + raw[i + 1] as u32 * 151 + raw[i + 2] as u32 * 28) >> 8) as u8;
+            lo = lo.min(v); hi = hi.max(v);
+        }
+        hi - lo < 24
+    })
+}
+
 fn run(region: Rect, opts: ScrollOptions, paused: bool, etx: Sender<Event>, crx: Receiver<Command>) {
     let mut stitcher = Stitcher::new();
     let mut auto = opts.auto;
@@ -104,6 +140,10 @@ fn run(region: Rect, opts: ScrollOptions, paused: bool, etx: Sender<Event>, crx:
     let mut last_push: Option<Push> = None;
     let mut first_grab_done = false;
     let mut debug = SessionDebug::new();
+    // Automatic scrolling recovery: whether anything has scrolled yet, and how far the "window does
+    // not react" fallbacks have gone (0: wheel notches, 1: smooth pixel scrolling).
+    let mut ever_scrolled = false;
+    let mut pixel_mode = false;
 
     let ensure_scroller = |scroller: &mut Option<crate::scroll_input::Scroller>, etx: &Sender<Event>| -> bool {
         if scroller.is_some() { return true; }
@@ -118,7 +158,7 @@ fn run(region: Rect, opts: ScrollOptions, paused: bool, etx: Sender<Event>, crx:
         let timeout = if running { Duration::from_millis(if auto { 10 } else { 40 }) } else { Duration::from_millis(100) };
         match crx.recv_timeout(timeout) {
             Ok(Command::Start) => running = true,
-            Ok(Command::SetAuto(a)) => { auto = a; auto_primed = false; unchanged_after_scroll = 0; }
+            Ok(Command::SetAuto(a)) => { auto = a; auto_primed = false; unchanged_after_scroll = 0; pixel_mode = false; }
             Ok(Command::Finish) => { finished = true; }
             Ok(Command::Cancel) => { cancelled = true; }
             Err(crossbeam_channel::RecvTimeoutError::Disconnected) => { cancelled = true; }
@@ -166,15 +206,43 @@ fn run(region: Rect, opts: ScrollOptions, paused: bool, etx: Sender<Event>, crx:
                 auto_primed = true;
                 match grab(region) { Ok(f) => { let p = stitcher.push(f); debug.record(&stitcher, p); last_push = Some(p); } Err(e) => { let _ = etx.send(Event::Error(format!("{e:#}"))); } }
             } else {
-                if s.scroll(dx, dy).is_err() { auto = false; continue; }
+                let sent = if pixel_mode {
+                    // Smooth (touchpad-style) scrolling, about a wheel notch's worth of pixels per notch.
+                    let px = opts.notches as f64 * 100.0;
+                    s.scroll_pixels(if opts.horizontal { px } else { 0.0 }, if opts.horizontal { 0.0 } else { px })
+                } else { s.scroll(dx, dy) };
+                if sent.is_err() { auto = false; continue; }
                 match grab_settled(region, Duration::from_millis(900)) {
                     Ok(f) => {
+                        let f = if opts.horizontal { f } else { wait_for_lazy_content(region, f, stitcher.static_bands().1) };
                         let prev = stitcher.last_frame().cloned();
                         let p = stitcher.push(f.clone());
                         debug.record_pair(&stitcher, p, prev, f);
                         last_push = Some(p);
+                        if matches!(p, Push::Scrolled { .. }) { ever_scrolled = true; }
                         if matches!(p, Push::NoChange) { unchanged_after_scroll += 1; } else { unchanged_after_scroll = 0; }
-                        if unchanged_after_scroll >= 2 { let _ = etx.send(Event::AutoFinished); auto = false; }
+                        if unchanged_after_scroll >= 2 {
+                            if ever_scrolled {
+                                // It scrolled before and stopped moving: the end of the content.
+                                let _ = etx.send(Event::AutoFinished);
+                                auto = false;
+                            } else if !pixel_mode {
+                                // Nothing has moved at all. Some applications ignore discrete wheel
+                                // steps or lost the pointer: aim at the region again and switch to
+                                // smooth scrolling before giving up.
+                                tracing::info!("automatic scrolling: no movement with wheel steps, trying smooth scrolling");
+                                let c = region.center();
+                                let _ = s.move_to(c.x, c.y);
+                                std::thread::sleep(Duration::from_millis(120));
+                                pixel_mode = true;
+                                unchanged_after_scroll = 0;
+                            } else {
+                                let _ = etx.send(Event::Error("This window did not scroll. Click inside it once, then press Auto-scroll again (or scroll by hand).".into()));
+                                auto = false;
+                                pixel_mode = false;
+                                unchanged_after_scroll = 0;
+                            }
+                        }
                     }
                     Err(e) => { let _ = etx.send(Event::Error(format!("{e:#}"))); }
                 }

@@ -144,7 +144,14 @@ pub mod autostart {
                 let e = e.trim();
                 if let Some(rest) = e.strip_prefix('"') { rest.split('"').next().unwrap_or("").to_string() } else { e.split_whitespace().next().unwrap_or("").to_string() }
             });
-            if target.map(|t| !std::path::Path::new(&t).exists()).unwrap_or(true) { let _ = std::fs::write(&p, entry(&exe)); }
+            // Rewrite when the program is gone, or when the installed package is running and the
+            // entry still starts some other build (a development copy).
+            let installed = exe.starts_with("/usr/") || exe.starts_with("/opt/");
+            let stale = match &target {
+                None => true,
+                Some(t) => !std::path::Path::new(t).exists() || (installed && std::path::Path::new(t) != exe.as_path()),
+            };
+            if stale { let _ = std::fs::write(&p, entry(&exe)); }
         }
     }
 

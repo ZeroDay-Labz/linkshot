@@ -137,11 +137,19 @@ pub fn hotkey_editor(ui: &mut Ui, p: &Palette, hk: &mut linkshot_core::presets::
     let fill = if is_editing { p.input_primary } else if resp.hovered() { p.control_bright } else { p.control };
     ui.painter().rect_filled(rect, 11.0, fill);
     ui.painter().rect_stroke(rect, 11.0, egui::Stroke::new(1.0_f32, if is_editing { p.product_bright } else { p.control_outline }), egui::StrokeKind::Inside);
-    let text = if is_editing { "Press keys… (Del clears)".to_string() } else { hk.display() };
-    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, text, egui::FontId::proportional(12.0), if hk.is_none() && !is_editing { p.input_secondary } else { p.text });
+    let text = if is_editing { (if rect.width() < 160.0 { "Keys…" } else { "Press keys…" }).to_string() } else { hk.display() };
+    let text_pos = if is_editing { egui::Pos2::new(rect.left() + (rect.width() - 46.0) / 2.0, rect.center().y) } else { rect.center() };
+    ui.painter().text(text_pos, egui::Align2::CENTER_CENTER, text, egui::FontId::proportional(12.0), if hk.is_none() && !is_editing { p.input_secondary } else { p.text });
+    let prtsc = if is_editing { print_screen_chip(ui, p, rect, ui.id().with(("hk-prtsc", id))) } else { false };
     if resp.clicked() { *editing = if is_editing { None } else { Some(id.to_string()) }; }
     let mut changed = false;
     let mut warning = None;
+    if prtsc {
+        let mods = ui.ctx().input(|i| i.modifiers);
+        *hk = HotKey { key: "PrintScreen".into(), ctrl: mods.ctrl, alt: mods.alt, shift: mods.shift, win: mods.command && !mods.ctrl };
+        *editing = None;
+        return (true, None);
+    }
     if is_editing {
         let (keys, mods) = ui.ctx().input(|i| (i.keys_down.clone(), i.modifiers));
         if ui.ctx().input(|i| i.key_pressed(egui::Key::Escape)) { *editing = None; return (false, None); }
@@ -163,4 +171,15 @@ pub fn hotkey_editor(ui: &mut Ui, p: &Palette, hk: &mut linkshot_core::presets::
         if resp.clicked_elsewhere() { *editing = None; }
     }
     (changed, warning)
+}
+
+/// A small "PrtSc" chip at the right end of a listening hotkey field. Print Screen cannot be
+/// pressed into the field (the toolkit has no such key and the desktop grabs it), so it is clicked
+/// instead; held modifiers are added. Returns true when clicked.
+pub fn print_screen_chip(ui: &mut Ui, p: &Palette, field: Rect, id: egui::Id) -> bool {
+    let chip = Rect::from_min_max(egui::Pos2::new(field.right() - 46.0, field.top() + 2.0), egui::Pos2::new(field.right() - 3.0, field.bottom() - 2.0));
+    let r = ui.interact(chip, id, Sense::click()).on_hover_text("Use the Print Screen key (hold Ctrl/Alt/Shift to combine)");
+    ui.painter().rect_filled(chip, 9.0, if r.hovered() { p.product_bright } else { p.product });
+    ui.painter().text(chip.center(), egui::Align2::CENTER_CENTER, "PrtSc", egui::FontId::proportional(10.5), Color32::WHITE);
+    r.clicked()
 }

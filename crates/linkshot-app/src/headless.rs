@@ -147,6 +147,10 @@ pub fn run_shots(dir: &std::path::Path, files: &[std::path::PathBuf], dark: bool
         Ok(())
     };
     shot(&mut app, &mut renderer, "capture_window.png")?;
+    // The capture hotkey field while it listens (shows the Print Screen chip).
+    app.capture.editing_hotkey_for = Some("global".into());
+    shot(&mut app, &mut renderer, "capture_window_hotkey.png")?;
+    app.capture.editing_hotkey_for = None;
     app.capture.presets_expanded = true;
     shot(&mut app, &mut renderer, "capture_window_presets.png")?;
     app.presets.selected_mode = linkshot_core::enums::CaptureMode::CaptureModeImage;

@@ -171,6 +171,78 @@ fn blank_overlap(prev_hash: &[u64], cur_hash: &[u64], top: usize, bottom: usize)
     best
 }
 
+/// Number of column blocks a row is reduced to for [`coarse_offset`].
+const COARSE_BLOCKS: usize = 48;
+
+/// Each row of `[top, bottom)` reduced to the mean brightness of `COARSE_BLOCKS` column blocks
+/// (central band only). Averaging over a block cancels per-pixel noise.
+fn row_profiles(g: &Gray, top: usize, bottom: usize) -> Vec<[f32; COARSE_BLOCKS]> {
+    let x0 = g.w * 2 / 100;
+    let x1 = (g.w * 94 / 100).max(x0 + COARSE_BLOCKS);
+    let span = x1 - x0;
+    (top..bottom).map(|y| {
+        let row = g.row(y);
+        let mut out = [0.0f32; COARSE_BLOCKS];
+        for (b, o) in out.iter_mut().enumerate() {
+            let (a, e) = (x0 + span * b / COARSE_BLOCKS, x0 + span * (b + 1) / COARSE_BLOCKS);
+            let sum: u32 = row[a..e].iter().map(|&v| v as u32).sum();
+            *o = sum as f32 / (e - a).max(1) as f32;
+        }
+        out
+    }).collect()
+}
+
+/// Fallback for content the exact row matcher cannot place: photographs, gradients, frames with
+/// per-pixel noise (video, compression), where no row repeats exactly. Every offset with a large
+/// enough overlap is scored by the mean difference of block-averaged rows. An offset is accepted
+/// only when it fits well in absolute terms *and* clearly beats every offset that is not its
+/// neighbour; anything ambiguous returns None, so the frame is dropped rather than guessed.
+fn coarse_offset(prev: &Gray, cur: &Gray, top: usize, bottom: usize, prior: Option<i32>) -> Option<i32> {
+    let band = bottom.saturating_sub(top);
+    if band < 64 || prev.w != cur.w || prev.w < COARSE_BLOCKS * 2 { return None; }
+    let pp = row_profiles(prev, top, bottom);
+    let cp = row_profiles(cur, top, bottom);
+    // Featureless content (a flat fill) gives no positional information.
+    let mean: f32 = cp.iter().flat_map(|r| r.iter()).sum::<f32>() / (band * COARSE_BLOCKS) as f32;
+    let var: f32 = cp.iter().flat_map(|r| r.iter()).map(|v| (v - mean) * (v - mean)).sum::<f32>() / (band * COARSE_BLOCKS) as f32;
+    if var < 25.0 { return None; }
+    let min_overlap = (band * 3 / 10).max(48);
+    let max_dy = (band - min_overlap) as i32;
+    let step = if band > 600 { 2 } else { 1 };
+    let mut errs: Vec<(i32, f32)> = Vec::with_capacity((2 * max_dy + 1) as usize);
+    for dy in -max_dy..=max_dy {
+        let (c0, c1) = if dy >= 0 { (0usize, band - dy as usize) } else { ((-dy) as usize, band) };
+        let mut sum = 0.0f32;
+        let mut n = 0usize;
+        let mut y = c0;
+        while y < c1 {
+            let (a, b) = (&cp[y], &pp[(y as i32 + dy) as usize]);
+            for k in 0..COARSE_BLOCKS { sum += (a[k] - b[k]).abs(); }
+            n += COARSE_BLOCKS;
+            y += step;
+        }
+        errs.push((dy, sum / n.max(1) as f32));
+    }
+    let bi = errs.iter().enumerate().min_by(|a, b| a.1 .1.partial_cmp(&b.1 .1).unwrap_or(std::cmp::Ordering::Equal))?.0;
+    let (best_dy, best) = errs[bi];
+    // Another candidate is a separate local minimum (better than everything within 3 rows of it)
+    // well away from the best one: periodic content offers several such dips.
+    let is_local_min = |i: usize| {
+        let lo = i.saturating_sub(3);
+        let hi = (i + 3).min(errs.len() - 1);
+        (lo..=hi).all(|j| j == i || errs[j].1 >= errs[i].1)
+    };
+    let runner_up = (0..errs.len()).filter(|&i| (errs[i].0 - best_dy).abs() > 8 && is_local_min(i)).map(|i| errs[i].1).fold(f32::INFINITY, f32::min);
+    // The best offset has to be a real dip, not a point on a flat plateau (featureless gradients).
+    let around = |d: i32| errs.iter().find(|e| e.0 == best_dy + d).map(|e| e.1).unwrap_or(f32::INFINITY);
+    let dip = around(-8).min(around(8)) - best;
+    if std::env::var_os("LINKSHOT_STITCH_DEBUG").is_some() { eprintln!("  coarse: best dy={best_dy} err={best:.2} runner-up={runner_up:.2} dip={dip:.2} prior={prior:?}"); }
+    // Noise of ±a levels averages to well under 1 level per block; a wrong offset on real content
+    // differs by many levels.
+    if best > 2.5 || dip < 0.4 || runner_up < best * 1.5 + 1.0 { return None; }
+    Some(best_dy)
+}
+
 /// Rows of a frame pair (that scrolled) belonging to an element pinned to the viewport: a run of at
 /// least 8 rows identical at the same screen position in both frames, containing real content
 /// (at least two rows that are not flat). Isolated identical rows — blank lines that happen to
@@ -312,6 +384,10 @@ impl Stitcher {
             let pt = prev.transposed();
             let ct = cur.transposed();
             if let Some(m) = find_offset(&pt, &ct, 0, pt.h, prior) { result = Some((Axis::Horizontal, m.dy)); }
+        }
+        // Neither axis matched exactly: try the noise-tolerant comparison (vertical scrolling only).
+        if result.is_none() && try_vertical {
+            if let Some(dy) = coarse_offset(prev, &cur, self.static_top, h - self.static_bottom, prior) { result = Some((Axis::Vertical, dy)); }
         }
         // Sticky header/footer: rows that stay identical although the content scrolled. Learned from
         // scrolled frames only; keep the smallest seen so coincidences get corrected later.
@@ -722,5 +798,75 @@ mod memory_tests {
         assert!(out.pixels().zip(page_part.pixels()).all(|(a, b)| a == b), "stitched pixels differ from the page");
         eprintln!("frames {} strips kept {} length {}", st.frames, st.accepted(), st.length());
         assert!(st.accepted() <= (st.length() / (vh / 2)) as usize + 3, "kept {} strips for {} px", st.accepted(), st.length());
+    }
+}
+
+#[cfg(test)]
+mod noisy_tests {
+    use super::*;
+    use image::{Rgba, RgbaImage};
+
+    /// A photo-like page: smooth gradients and soft blobs, no sharp rows to hash.
+    fn photo_page(w: u32, h: u32) -> RgbaImage {
+        let mut img = RgbaImage::new(w, h);
+        for y in 0..h { for x in 0..w {
+            let fx = x as f32 / w as f32; let fy = y as f32 / 300.0;
+            let v = 0.5 + 0.25 * (fy * 2.1 + fx * 3.0).sin() + 0.2 * (fy * 0.7 - fx * 5.0).cos() + 0.05 * ((x / 37 + y / 23) % 7) as f32 / 7.0;
+            let b = (v.clamp(0.0, 1.0) * 220.0) as u8;
+            img.put_pixel(x, y, Rgba([b, (b as u32 * 9 / 10) as u8, 255 - b, 255]));
+        } }
+        img
+    }
+
+    /// Per-frame sensor/compression-like noise: every row differs a little from frame to frame.
+    fn noisy(img: &RgbaImage, seed: u64, amp: i32) -> RgbaImage {
+        let mut s = seed | 1;
+        let mut out = img.clone();
+        for p in out.pixels_mut() {
+            s ^= s << 13; s ^= s >> 7; s ^= s << 17;
+            let n = (s % (2 * amp as u64 + 1)) as i32 - amp;
+            for c in 0..3 { p.0[c] = (p.0[c] as i32 + n).clamp(0, 255) as u8; }
+        }
+        out
+    }
+
+    #[test]
+    fn stitches_noisy_photographic_content() {
+        let (w, ph, vh) = (640u32, 5000u32, 600u32);
+        let page = photo_page(w, ph);
+        let mut st = Stitcher::new();
+        let mut scroll = 0u32;
+        let steps = [0u32, 150, 220, 90, 300, 260, 180, 240, 310, 200];
+        for (i, step) in steps.iter().enumerate() {
+            scroll += step;
+            let f = noisy(&image::imageops::crop_imm(&page, 0, scroll, w, vh).to_image(), 1000 + i as u64, 7);
+            let r = st.push(f);
+            if i == 0 { assert_eq!(r, Push::First); continue; }
+            match r { Push::Scrolled { axis: Axis::Vertical, offset, .. } => assert_eq!(offset, *step as i32, "frame {i}"), other => panic!("frame {i}: {other:?}") }
+        }
+        assert_eq!(st.finish().unwrap().height(), scroll + vh);
+    }
+
+    #[test]
+    fn noisy_frames_without_overlap_are_still_dropped() {
+        let (w, ph, vh) = (640u32, 5000u32, 600u32);
+        let page = photo_page(w, ph);
+        let mut st = Stitcher::new();
+        let f = |s: u32, seed: u64| noisy(&image::imageops::crop_imm(&page, 0, s, w, vh).to_image(), seed, 7);
+        assert_eq!(st.push(f(0, 1)), Push::First);
+        assert_eq!(st.push(f(3000, 2)), Push::NoMatch);
+        for (k, far) in [1500u32, 2200, 4000].iter().enumerate() { assert_eq!(st.push(f(*far, 3 + k as u64)), Push::NoMatch, "jump to {far}"); }
+    }
+
+    /// A completely different picture (another photo) must not be stitched on.
+    #[test]
+    fn unrelated_noisy_content_is_dropped() {
+        let (w, vh) = (640u32, 600u32);
+        let a = photo_page(w, 2000);
+        let mut b = photo_page(w, 2000);
+        for p in b.pixels_mut() { p.0.swap(0, 2); p.0[1] = 255 - p.0[1]; }
+        let mut st = Stitcher::new();
+        assert_eq!(st.push(noisy(&image::imageops::crop_imm(&a, 0, 0, w, vh).to_image(), 1, 7)), Push::First);
+        assert_eq!(st.push(noisy(&image::imageops::crop_imm(&b, 0, 100, w, vh).to_image(), 2, 7)), Push::NoMatch);
     }
 }
