@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.7.0 — 2026-11-27
+
+Scrolling capture:
+- **Automatic scrolling through the accessibility interface** (KDE Plasma). LinkShot finds the
+  scroll bar of the view under the region and moves it directly: exact steps, a precise end, no
+  pointer moves and no input permission prompt. Works with Qt and GTK views that expose their scroll
+  bars (text views, settings pages, lists); browsers, Electron apps and views that do not follow their
+  scroll bar fall back to wheel scrolling automatically.
+- **Nothing gets skipped.** When an automatic step jumps past the last frame (scroll acceleration,
+  short views), LinkShot scrolls back to where it overlapped and continues in smaller steps. When
+  scrolling by hand too fast, the toolbar says "Scrolled too far — scroll back a little"; and if the
+  end of what you scrolled to could not be joined, the Editor tells you instead of silently dropping it.
+- **Stitches more kinds of content:** pages with a video or animation playing (the moving area no
+  longer prevents a match), text re-rendered at fractional display scaling (e.g. 170 %), and noisy
+  or photographic content scrolled sideways.
+
+Reliability:
+- Several GIF/MP4 exports can run at once; each one lands in the tray when done (a second export used
+  to make the first one's result disappear).
+- Disk use stays bounded: deleting or discarding an unsaved recording removes its raw recording,
+  saved recordings keep their raw file under the saved name, the decoded-video and thumbnail caches
+  are capped (2 GB / 500 MB, least recently used first), and temporary files for Program and Email
+  sharing go to the cache instead of the library.
+- Errors are reported instead of swallowed: unreadable preset files ("Imported 0 presets" before),
+  failed preset exports, a tray list that cannot be saved, failed interval captures. Messages also
+  appear in the Capture window, not only in the Editor.
+- Delayed, scheduled and interval captures take their screenshot on a background thread, so the
+  windows stay responsive.
+- Global shortcuts of presets keep their key when other presets are added, removed or reordered.
+- The All-in-One "more options" arrow points the right way when expanded.
+- CI now runs clippy (warnings are errors) and tests on Windows too.
+
 ## 0.6.1 — 2026-11-27
 
 - **About LinkShot** (Help menu, tray) is now a proper window: version, license (MIT or Apache-2.0),

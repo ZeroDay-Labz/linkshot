@@ -31,7 +31,7 @@ A prioritised list from a full read-through of the code on 2026-10-18, followed 
    round-trip on GNOME); the library scan reads every `.snagx` fully on a toolbar click. Move both
    to worker threads; have the scanner read only the metadata and page JSON. **Library part done**
    (0.4.0: metadata-only scan on a worker thread, cached thumbnails, virtualised grid); the snapshot
-   for timed captures still runs inline.
+   for timed captures still runs inline. **done** (0.7.0: delayed, scheduled and interval screenshots on worker threads).
 8. **Non-KDE Wayland scrolling/video** — region frames fall back to a full portal screenshot per frame,
    so the 40 ms scrolling loop and the 30 fps recorder hammer the portal. Add a ScreenCast/PipeWire
    frame source (the `screencast` feature is already enabled but unused) or disable those modes
@@ -48,14 +48,14 @@ A prioritised list from a full read-through of the code on 2026-10-18, followed 
 10. **GlobalShortcuts portal sessions** — every `apply` spawns a new thread and portal session; old
     ones linger until their next activation. Sessions are now closed on re-apply (the new one waits
     for it) and failures show next to the hotkey settings. **mostly done** — still to do: use the
-    preset UUID alone as shortcut id so deleting a preset does not rebind the others.
+    preset UUID alone as shortcut id so deleting a preset does not rebind the others. **done** (0.7.0)
 11. **Disk growth** — recording masters are never pruned, tray *Delete* leaves the master behind,
     `cache/video` is unbounded, Program/Email temp exports land inside the library. Delete masters
-    with their files, cap the caches, write temps to the cache dir.
+    with their files, cap the caches, write temps to the cache dir. **done** (0.7.0: `housekeeping.rs`)
 12. **Startup decodes every tray video** — one ffmpeg decode per video in the tray even if never
     viewed. Decode lazily when the item becomes current. **done** (0.4.0)
 13. **Single export slot** — starting a second export drops the receiver of the running one; the file
-    is written but the tray is not updated. Queue exports or refuse while busy.
+    is written but the tray is not updated. Queue exports or refuse while busy. **done** (0.7.0: `export_jobs`)
 14. **Windows gaps** — no single-instance guard (**done** 0.4.0), cursor not drawn on still captures
     (**done** 0.4.0, GDI), window capture
     unavailable on Wayland (KWin `CaptureActiveWindow` exists but is unused). `run_program` re-splits
@@ -63,7 +63,7 @@ A prioritised list from a full read-through of the code on 2026-10-18, followed 
     (Autostart via the Run key: **done**.)
 15. **Swallowed errors** — tray.json serialise errors, Export Presets write errors, bad preset JSON
     ("Imported 0 preset(s)"), unparseable schedule time (captures immediately). Route through the
-    status line and `tracing::warn!`.
+    status line and `tracing::warn!`. **done** (0.7.0)
 
 ## Nice-to-have
 
