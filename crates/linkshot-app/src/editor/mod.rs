@@ -1,6 +1,7 @@
 //! The Editor window: caption/menu row, top panel with toolbar, canvas, side panel, footer, tray.
 
 pub mod canvas;
+pub mod combine;
 pub mod side_panel;
 pub mod simplify;
 pub mod stamps;
@@ -114,6 +115,7 @@ pub struct EditorState {
     /// Running uploads (Imgur, Nextcloud).
     pub uploads: Vec<crate::uploads::UploadJob>,
     pub simplify: simplify::Options,
+    pub combine: combine::CombineDialog,
     pub nextcloud_login: Option<crate::uploads::NextcloudLogin>,
     pub nextcloud_error: Option<String>,
     /// Wakes the UI loop from worker threads (players, exports).
@@ -175,6 +177,7 @@ impl EditorState {
             export_jobs: Vec::new(),
             uploads: Vec::new(),
             simplify: simplify::Options::default(),
+            combine: combine::CombineDialog::default(),
             nextcloud_login: None,
             nextcloud_error: None,
             wake: std::sync::Arc::new(|| {}),
@@ -776,6 +779,8 @@ fn editor_menu(app: &mut App, ui: &mut egui::Ui, ctx: &egui::Context, actions: &
         if ui.button("Editor Preferences...").clicked() { app.show_prefs = true; ui.close(); }
     });
     ui.menu_button("Image", |ui| {
+        if ui.button("Combine Images...").on_hover_text("Put several captures from the tray into one image").clicked() { let (n, c) = (app.editor.docs.len(), app.editor.current); app.editor.combine.show_with(combine::Layout::SideBySide, n, c); ui.close(); }
+        ui.separator();
         ui.menu_button("Tools", |ui| { for t in ToolMode::TOOLBAR_TOOLS { if ui.button(t.label()).clicked() { app.editor.select_tool(*t); ui.close(); } } });
         ui.menu_button("Effects", |ui| { for e in [EffectType::EffectBorder, EffectType::EffectEdge, EffectType::EffectShadow, EffectType::EffectFilter, EffectType::EffectColorAdjustment, EffectType::EffectTrim] { if ui.button(e.label()).clicked() { app.editor.side_panel = SidePanelMode::Effects; app.editor.side_panel_visible = true; side_panel::set_effect(app, e); ui.close(); } } });
         ui.separator();
@@ -911,7 +916,9 @@ fn top_panel(app: &mut App, ui: &mut egui::Ui, rect: Rect, actions: &mut Vec<Act
             ui.add_space(4.0);
             let create = widgets::dropdown_button(ui, &pal, "Create", false, 0.0);
             egui::Popup::menu(&create).show(|ui| {
-                if ui.button("Image from Template...").clicked() { app.editor.set_status("Templates are planned for a later phase."); ui.close(); }
+                for l in combine::Layout::ALL {
+                    if ui.button(format!("Image from Template: {}...", l.label())).on_hover_text(l.hint()).clicked() { let (n, c) = (app.editor.docs.len(), app.editor.current); app.editor.combine.show_with(l, n, c); ui.close(); }
+                }
                 if ui.button("Video from Images...").clicked() { app.editor.set_status("Video from Images is planned for a later phase."); ui.close(); }
             });
         });
@@ -1304,6 +1311,7 @@ fn dialogs(app: &mut App, ctx: &egui::Context, actions: &mut Vec<Action>) {
         if !open || app.editor.current.is_none() { app.editor.size_popup = false; }
     }
     if app.show_prefs { preferences_window(app, ctx, actions); }
+    combine::dialog(app, ctx);
 }
 
 /// Destinations offered in the Share menus: the enabled ones that work, plus LinkShot's own.
