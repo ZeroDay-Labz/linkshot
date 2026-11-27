@@ -89,4 +89,15 @@ mod tests {
         assert_eq!(expand("<Prefix><AutoNum>", &s, 7, now, &NameContext::default()), "SNAG-0007");
         assert_eq!(sanitize("a/b:c?"), "a_b_c_");
     }
+
+    #[test]
+    fn sanitize_keeps_whole_characters() {
+        // 200 multi-byte characters: truncating at a byte offset would split one (and panic).
+        let long: String = "ä😀".repeat(100);
+        let s = sanitize(&long);
+        assert_eq!(s.chars().count(), 120);
+        assert!(s.is_char_boundary(s.len()));
+        assert_eq!(sanitize("  Bildschirmfoto.  "), "Bildschirmfoto");
+        assert_eq!(sanitize("line\nbreak\t"), "line_break_");
+    }
 }

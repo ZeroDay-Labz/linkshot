@@ -349,4 +349,33 @@ mod tests {
         assert_eq!(rd.frame(7).unwrap(), &frame(w, h, 7)[..]);
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    /// Damaged or foreign files are refused with an error, never a panic or a huge allocation.
+    #[test]
+    fn rejects_corrupt_headers() {
+        let dir = std::env::temp_dir().join(format!("linkshot-spool-bad-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("bad.lsv");
+        // Too short for a header.
+        std::fs::write(&path, b"LS").unwrap();
+        assert!(SpoolReader::open(&path).is_err());
+        // Wrong magic.
+        std::fs::write(&path, vec![0u8; HEADER_LEN as usize + 16]).unwrap();
+        assert!(SpoolReader::open(&path).is_err());
+        // Right magic, absurd frame size (would overflow width * height * 4).
+        let mut h = vec![0u8; HEADER_LEN as usize];
+        h[0..4].copy_from_slice(MAGIC);
+        h[4..8].copy_from_slice(&u32::MAX.to_le_bytes());
+        h[8..12].copy_from_slice(&u32::MAX.to_le_bytes());
+        std::fs::write(&path, &h).unwrap();
+        assert!(SpoolReader::open(&path).is_err());
+        // Valid header, garbage after it: no frames, but no panic either.
+        h[4..8].copy_from_slice(&64u32.to_le_bytes());
+        h[8..12].copy_from_slice(&48u32.to_le_bytes());
+        let mut bytes = h.clone();
+        bytes.extend((0..5000u32).map(|i| (i.wrapping_mul(2654435761) >> 24) as u8));
+        std::fs::write(&path, &bytes).unwrap();
+        if let Ok(mut rd) = SpoolReader::open(&path) { for i in 0..rd.len().min(4) { let _ = rd.frame(i); } }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

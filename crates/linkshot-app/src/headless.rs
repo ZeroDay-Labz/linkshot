@@ -222,6 +222,15 @@ pub fn run_shots(dir: &std::path::Path, files: &[std::path::PathBuf], dark: bool
         for _ in 0..2 { let _ = render_frame(&hctx, &mut renderer, hsize, 2.0, bg, |ctx| hud.ui(ctx, &pal)); }
         let img = render_frame(&hctx, &mut renderer, hsize, 2.0, bg, |ctx| hud.ui(ctx, &pal));
         img.save(dir.join("scrolling_hud.png"))?;
+        // Manual scrolling too fast: the stitcher lost the overlap.
+        let _ = etx.send(Event::Progress { frames: 60, accepted: 9, length: 4410, last: None, axis: Some(linkshot_capture::stitch::Axis::Vertical), auto: false, misses: 5 });
+        let img = render_frame(&hctx, &mut renderer, hsize, 2.0, bg, |ctx| hud.ui(ctx, &pal));
+        img.save(dir.join("scrolling_hud_too_far.png"))?;
+        // Automatic scrolling slowed down after an overshoot.
+        let _ = etx.send(Event::Progress { frames: 70, accepted: 11, length: 5120, last: None, axis: Some(linkshot_capture::stitch::Axis::Vertical), auto: true, misses: 0 });
+        let _ = etx.send(Event::Warning("Slowing down so nothing is skipped".into()));
+        let img = render_frame(&hctx, &mut renderer, hsize, 2.0, bg, |ctx| hud.ui(ctx, &pal));
+        img.save(dir.join("scrolling_hud_warning.png"))?;
     }
     // Recording toolbar (ready, recording with audio + webcam, compact) and the Screen Draw layer.
     {

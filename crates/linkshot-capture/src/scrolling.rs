@@ -256,7 +256,7 @@ fn run(region: Rect, opts: ScrollOptions, paused: bool, etx: Sender<Event>, crx:
                                     if let Ok(f) = grab_settled(region, Duration::from_millis(900)) { let p = stitcher.push(f); last_push = Some(p); }
                                     a11y_step /= 2.0;
                                     if a11y_step < 0.01 || stitcher.misses() > 3 {
-                                        let _ = etx.send(Event::Warning("Automatic scrolling lost the page and stopped. Scroll on by hand, or press Done.".into()));
+                                        let _ = etx.send(Event::Warning("Lost the page. Scroll on by hand, or press Done.".into()));
                                         auto = false;
                                     }
                                 }
@@ -332,9 +332,9 @@ fn run(region: Rect, opts: ScrollOptions, paused: bool, etx: Sender<Event>, crx:
                             if can_shrink {
                                 if pixel_mode { px_step = (px_step / 2.0).max(25.0); } else { step = (step / 2).max(1); }
                                 tracing::info!("automatic scrolling: overshot, stepping back; now {} per step", if pixel_mode { format!("{px_step} px") } else { format!("{step} notches") });
-                                if !slowed_down { slowed_down = true; let _ = etx.send(Event::Warning("Scrolling in smaller steps so nothing is skipped".into())); }
+                                if !slowed_down { slowed_down = true; let _ = etx.send(Event::Warning("Slowing down so nothing is skipped".into())); }
                             } else if stitcher.misses() > 0 {
-                                let _ = etx.send(Event::Warning("Automatic scrolling lost the page and stopped. Scroll on by hand, or press Done.".into()));
+                                let _ = etx.send(Event::Warning("Lost the page. Scroll on by hand, or press Done.".into()));
                                 auto = false;
                             }
                         }
