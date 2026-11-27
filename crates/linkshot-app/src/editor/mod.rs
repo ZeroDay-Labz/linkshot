@@ -1128,6 +1128,7 @@ fn library_view(app: &mut App, ui: &mut egui::Ui, rect: Rect, ctx: &egui::Contex
     ui.painter().rect_filled(search, 0.0, pal.dark_panel);
     ui.scope_builder(egui::UiBuilder::new().max_rect(search.shrink(10.0)), |ui| {
         ui.label(egui::RichText::new("Library").strong().size(14.0));
+        ui.add_space(4.0);
         ui.add(egui::TextEdit::singleline(&mut app.editor.library_filter).hint_text("Search"));
         ui.add_space(8.0);
         let n_img = app.editor.library.entries.values().filter(|e| e.kind == TrayItemType::Image).count();
@@ -1138,7 +1139,7 @@ fn library_view(app: &mut App, ui: &mut egui::Ui, rect: Rect, ctx: &egui::Contex
         ui.label(egui::RichText::new("Tags").strong());
         for t in app.editor.library.all_tags() { if ui.selectable_label(app.editor.library_filter == t, &t).clicked() { app.editor.library_filter = t; } }
         ui.add_space(8.0);
-        if ui.button("Refresh").clicked() { let dir = app.settings.library_dir(&app.paths); app.editor.library_scanned = false; app.editor.start_library_scan(dir); }
+        if ui.add(egui::Button::new("Refresh").wrap_mode(egui::TextWrapMode::Extend)).clicked() { let dir = app.settings.library_dir(&app.paths); app.editor.library_scanned = false; app.editor.start_library_scan(dir); }
         if app.editor.library_scan.is_some() { ui.label(egui::RichText::new("Scanning…").small().color(pal.input_secondary)); }
         ui.label(egui::RichText::new(app.settings.library_dir(&app.paths).display().to_string()).small().color(pal.input_secondary));
     });

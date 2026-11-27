@@ -7,14 +7,23 @@ use anyhow::Context as _;
 use image::RgbaImage;
 use std::collections::HashMap;
 
+/// Textures are kept per egui context: every context numbers its own textures (each has a font
+/// atlas `TextureId::Managed(0)`), and the shots drive several contexts through one renderer.
 pub struct SoftwareRenderer {
-    textures: HashMap<TextureId, RgbaImage>,
+    textures: HashMap<(u64, TextureId), RgbaImage>,
+    scope: u64,
 }
 
 impl Default for SoftwareRenderer { fn default() -> Self { Self::new() } }
 
 impl SoftwareRenderer {
-    pub fn new() -> Self { Self { textures: HashMap::new() } }
+    pub fn new() -> Self { Self { textures: HashMap::new(), scope: 0 } }
+
+    /// Selects the texture set of `ctx` for the following updates and renders.
+    pub fn bind(&mut self, ctx: &egui::Context) {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        self.scope = ctx.data_mut(|d| *d.get_temp_mut_or_insert_with(egui::Id::new("headless-renderer-scope"), || NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+    }
 
     pub fn update_textures(&mut self, delta: &egui::TexturesDelta) {
         for (id, d) in &delta.set {
@@ -26,17 +35,17 @@ impl SoftwareRenderer {
                 }
             };
             match d.pos {
-                None => { self.textures.insert(*id, img); }
+                None => { self.textures.insert((self.scope, *id), img); }
                 Some([x, y]) => {
-                    if let Some(t) = self.textures.get_mut(id) { image::imageops::replace(t, &img, x as i64, y as i64); } else { self.textures.insert(*id, img); }
+                    if let Some(t) = self.textures.get_mut(&(self.scope, *id)) { image::imageops::replace(t, &img, x as i64, y as i64); } else { self.textures.insert((self.scope, *id), img); }
                 }
             }
         }
-        for id in &delta.free { self.textures.remove(id); }
+        for id in &delta.free { self.textures.remove(&(self.scope, *id)); }
     }
 
     fn sample(&self, id: TextureId, u: f32, v: f32) -> [f32; 4] {
-        let Some(t) = self.textures.get(&id) else { return [1.0, 1.0, 1.0, 1.0] };
+        let Some(t) = self.textures.get(&(self.scope, id)) else { return [1.0, 1.0, 1.0, 1.0] };
         let (w, h) = (t.width() as f32, t.height() as f32);
         let x = (u * w - 0.5).clamp(0.0, w - 1.0);
         let y = (v * h - 0.5).clamp(0.0, h - 1.0);
@@ -112,6 +121,7 @@ impl SoftwareRenderer {
 pub fn render_frame(ctx: &egui::Context, renderer: &mut SoftwareRenderer, size: egui::Vec2, ppp: f32, background: Color32, mut run: impl FnMut(&egui::Context)) -> RgbaImage {
     let raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)), max_texture_side: Some(16384), ..Default::default() };
     ctx.set_pixels_per_point(ppp);
+    renderer.bind(ctx);
     let out = ctx.run(raw, |ctx| run(ctx));
     renderer.update_textures(&out.textures_delta);
     let prims = ctx.tessellate(out.shapes, ppp);
@@ -189,6 +199,7 @@ pub fn run_shots(dir: &std::path::Path, files: &[std::path::PathBuf], dark: bool
     {
         let raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, size)), max_texture_side: Some(16384), events: vec![egui::Event::PointerMoved(egui::Pos2::new(size.x * 0.42, size.y * 0.47))], ..Default::default() };
         let out = octx.run(raw, |ctx| overlay.ui(ctx, &pal, 0));
+        renderer.bind(&octx);
         renderer.update_textures(&out.textures_delta);
     }
     for _ in 0..2 { let _ = render_frame(&octx, &mut renderer, size, 1.0, bg, |ctx| overlay.ui(ctx, &pal, 0)); }
@@ -250,6 +261,7 @@ pub fn run_shots(dir: &std::path::Path, files: &[std::path::PathBuf], dark: bool
         let mut feed = |events: Vec<egui::Event>, draw: &mut crate::screen_draw::ScreenDraw| {
             let raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, dsize)), max_texture_side: Some(16384), events, ..Default::default() };
             let out = dctx.run(raw, |ctx| draw.ui(ctx, &pal));
+            renderer.bind(&dctx);
             renderer.update_textures(&out.textures_delta);
         };
         let drag = |feed: &mut dyn FnMut(Vec<egui::Event>, &mut crate::screen_draw::ScreenDraw), draw: &mut crate::screen_draw::ScreenDraw, a: egui::Pos2, b: egui::Pos2| {
@@ -358,6 +370,7 @@ pub fn run_selftest() -> anyhow::Result<()> {
     let mut feed = |events: Vec<Event>, overlay: &mut crate::overlay::Overlay| {
         let raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)), max_texture_side: Some(16384), events, ..Default::default() };
         let out = octx.run(raw, |ctx| overlay.ui(ctx, &pal, 0));
+        renderer.bind(&octx);
         renderer.update_textures(&out.textures_delta);
     };
     feed(vec![], &mut overlay);
