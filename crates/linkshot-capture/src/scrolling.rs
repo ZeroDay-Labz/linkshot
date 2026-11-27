@@ -34,6 +34,9 @@ pub enum Event {
     /// New portal restore token to persist.
     RestoreToken(String),
     Error(String),
+    /// Something the user should know that is not a failure: automatic scrolling slowed down after
+    /// overshooting, or the end of what was scrolled to could not be joined.
+    Warning(String),
     /// Final stitched image (None when cancelled or nothing was captured).
     Done(Option<RgbaImage>),
 }
@@ -144,6 +147,22 @@ fn run(region: Rect, opts: ScrollOptions, paused: bool, etx: Sender<Event>, crx:
     // not react" fallbacks have gone (0: wheel notches, 1: smooth pixel scrolling).
     let mut ever_scrolled = false;
     let mut pixel_mode = false;
+    // Automatic step size (wheel notches, or pixels in smooth mode). Halved whenever a step jumps
+    // past the overlap with the last frame, after scrolling back to it, so no content is skipped.
+    let mut step = opts.notches.max(1);
+    let mut px_step = opts.notches.max(1) as f64 * 100.0;
+    let mut slowed_down = false;
+    // Scrolling through the accessibility bus (exact steps, no pointer, no input permission), tried
+    // first on KDE; `a11y_step` is in the scroll bar's units, calibrated from the measured offsets.
+    #[cfg(target_os = "linux")]
+    let mut a11y: Option<crate::a11y_scroll::A11yScroller> = None;
+    #[cfg(target_os = "linux")]
+    let mut a11y_tried = false;
+    #[cfg(target_os = "linux")]
+    let mut a11y_step = 0.0f64;
+    // Set when switching from accessibility to wheel scrolling mid-capture: aim the pointer, but do
+    // not scroll back to the top and restart.
+    let mut keep_position = false;
 
     let ensure_scroller = |scroller: &mut Option<crate::scroll_input::Scroller>, etx: &Sender<Event>| -> bool {
         if scroller.is_some() { return true; }
@@ -158,7 +177,7 @@ fn run(region: Rect, opts: ScrollOptions, paused: bool, etx: Sender<Event>, crx:
         let timeout = if running { Duration::from_millis(if auto { 10 } else { 40 }) } else { Duration::from_millis(100) };
         match crx.recv_timeout(timeout) {
             Ok(Command::Start) => running = true,
-            Ok(Command::SetAuto(a)) => { auto = a; auto_primed = false; unchanged_after_scroll = 0; pixel_mode = false; }
+            Ok(Command::SetAuto(a)) => { auto = a; auto_primed = false; #[cfg(target_os = "linux")] { a11y_tried = false; a11y = None; } unchanged_after_scroll = 0; pixel_mode = false; step = opts.notches.max(1); px_step = step as f64 * 100.0; }
             Ok(Command::Finish) => { finished = true; }
             Ok(Command::Cancel) => { cancelled = true; }
             Err(crossbeam_channel::RecvTimeoutError::Disconnected) => { cancelled = true; }
@@ -179,10 +198,90 @@ fn run(region: Rect, opts: ScrollOptions, paused: bool, etx: Sender<Event>, crx:
             continue;
         }
 
+        #[cfg(target_os = "linux")]
+        if auto && !a11y_tried && !auto_primed {
+            a11y_tried = true;
+            let c = region.center();
+            match crate::a11y_scroll::A11yScroller::find((c.x, c.y), opts.horizontal) {
+                Ok(a) => { a11y_step = a.initial_step; a11y = Some(a); }
+                Err(e) => tracing::info!("accessibility scrolling unavailable ({e:#}); using wheel events"),
+            }
+        }
+        #[cfg(target_os = "linux")]
+        if auto && a11y.is_some() {
+            let a = a11y.as_ref().unwrap();
+            if !auto_primed {
+                if opts.scroll_from_top {
+                    if a.to_start().is_ok() { std::thread::sleep(Duration::from_millis(150)); }
+                    stitcher = Stitcher::new();
+                }
+                auto_primed = true;
+                match grab_settled(region, Duration::from_millis(900)) { Ok(f) => { let p = stitcher.push(f); debug.record(&stitcher, p); last_push = Some(p); } Err(e) => { let _ = etx.send(Event::Error(format!("{e:#}"))); } }
+            } else {
+                let moved = match a.scroll_by(a11y_step) {
+                    Ok(m) => m,
+                    Err(e) => { tracing::info!("accessibility scrolling failed ({e:#}); using wheel events"); a11y = None; auto_primed = false; keep_position = true; continue; }
+                };
+                if moved == 0.0 {
+                    // The scroll bar is at its end: so is the content.
+                    let _ = etx.send(Event::AutoFinished);
+                    auto = false;
+                } else {
+                    match grab_settled(region, Duration::from_millis(900)) {
+                        Ok(f) => {
+                            let f = if opts.horizontal { f } else { wait_for_lazy_content(region, f, stitcher.static_bands().1) };
+                            let prev = stitcher.last_frame().cloned();
+                            let p = stitcher.push(f.clone());
+                            debug.record_pair(&stitcher, p, prev, f);
+                            last_push = Some(p);
+                            // The visible length in frame pixels, without the sticky bands.
+                            let (st, sb) = stitcher.static_bands();
+                            let view = stitcher.last_frame().map(|f| if opts.horizontal { f.width() as f64 } else { f.height() as f64 - (st + sb) as f64 }).unwrap_or(400.0).max(40.0);
+                            match p {
+                                Push::Scrolled { offset, .. } => {
+                                    ever_scrolled = true;
+                                    // Pixels per unit from this step; aim for 60 % of the view per step.
+                                    let px_per_unit = offset.unsigned_abs() as f64 / moved.abs();
+                                    if px_per_unit > 0.0 { a11y_step = (view * 0.6 / px_per_unit).max(0.01).min(a.range()); }
+                                }
+                                Push::NoChange if !ever_scrolled => {
+                                    // The bar moved but the picture did not: not the bar of this view.
+                                    tracing::info!("accessibility scrolling: the view did not follow its scroll bar; using wheel events");
+                                    let _ = a.scroll_by(-moved);
+                                    a11y = None; auto_primed = false; keep_position = true;
+                                }
+                                Push::NoMatch => {
+                                    // Too far for an overlap: go back and take smaller steps.
+                                    let _ = a.scroll_by(-moved);
+                                    if let Ok(f) = grab_settled(region, Duration::from_millis(900)) { let p = stitcher.push(f); last_push = Some(p); }
+                                    a11y_step /= 2.0;
+                                    if a11y_step < 0.01 || stitcher.misses() > 3 {
+                                        let _ = etx.send(Event::Warning("Automatic scrolling lost the page and stopped. Scroll on by hand, or press Done.".into()));
+                                        auto = false;
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                        Err(e) => { let _ = etx.send(Event::Error(format!("{e:#}"))); }
+                    }
+                }
+            }
+            let _ = etx.send(Event::Progress { frames: stitcher.frames, accepted: stitcher.accepted(), length: stitcher.length(), last: last_push, axis: stitcher.axis(), auto, misses: stitcher.misses() });
+            continue;
+        }
+
         if auto {
             if !ensure_scroller(&mut scroller, &etx) { auto = false; continue; }
             let s = scroller.as_mut().unwrap();
-            let (dx, dy) = if opts.horizontal { (opts.notches, 0) } else { (0, opts.notches) };
+            let (dx, dy) = if opts.horizontal { (step, 0) } else { (0, step) };
+            // One automatic step forwards (sign 1) or back (-1).
+            let scroll_step = |s: &mut crate::scroll_input::Scroller, pixel_mode: bool, sign: i32| -> Result<()> {
+                if pixel_mode {
+                    let px = px_step * sign as f64;
+                    s.scroll_pixels(if opts.horizontal { px } else { 0.0 }, if opts.horizontal { 0.0 } else { px })
+                } else { s.scroll(dx * sign, dy * sign) }
+            };
             if !auto_primed {
                 // Wheel events go to the window under the pointer, which is still on the HUD button
                 // the user just pressed: put the pointer in the middle of the region first.
@@ -190,7 +289,7 @@ fn run(region: Rect, opts: ScrollOptions, paused: bool, etx: Sender<Event>, crx:
                 if let Err(e) = s.move_to(c.x, c.y) { tracing::warn!("move pointer: {e:#}"); }
                 std::thread::sleep(Duration::from_millis(120));
                 // Scroll back to the start first, so the capture begins at the top/left edge.
-                if opts.scroll_from_top {
+                if opts.scroll_from_top && !keep_position {
                     let mut prev = grab(region).ok();
                     for _ in 0..60 {
                         if s.scroll(-dx * 10, -dy * 10).is_err() { break; }
@@ -204,14 +303,11 @@ fn run(region: Rect, opts: ScrollOptions, paused: bool, etx: Sender<Event>, crx:
                     stitcher = Stitcher::new();
                 }
                 auto_primed = true;
+                if keep_position { keep_position = false; let _ = etx.send(Event::Progress { frames: stitcher.frames, accepted: stitcher.accepted(), length: stitcher.length(), last: last_push, axis: stitcher.axis(), auto, misses: stitcher.misses() }); continue; }
                 match grab(region) { Ok(f) => { let p = stitcher.push(f); debug.record(&stitcher, p); last_push = Some(p); } Err(e) => { let _ = etx.send(Event::Error(format!("{e:#}"))); } }
             } else {
-                let sent = if pixel_mode {
-                    // Smooth (touchpad-style) scrolling, about a wheel notch's worth of pixels per notch.
-                    let px = opts.notches as f64 * 100.0;
-                    s.scroll_pixels(if opts.horizontal { px } else { 0.0 }, if opts.horizontal { 0.0 } else { px })
-                } else { s.scroll(dx, dy) };
-                if sent.is_err() { auto = false; continue; }
+                // Smooth (touchpad-style) scrolling sends about a wheel notch's worth of pixels per notch.
+                if scroll_step(s, pixel_mode, 1).is_err() { auto = false; continue; }
                 match grab_settled(region, Duration::from_millis(900)) {
                     Ok(f) => {
                         let f = if opts.horizontal { f } else { wait_for_lazy_content(region, f, stitcher.static_bands().1) };
@@ -221,6 +317,27 @@ fn run(region: Rect, opts: ScrollOptions, paused: bool, etx: Sender<Event>, crx:
                         last_push = Some(p);
                         if matches!(p, Push::Scrolled { .. }) { ever_scrolled = true; }
                         if matches!(p, Push::NoChange) { unchanged_after_scroll += 1; } else { unchanged_after_scroll = 0; }
+                        if matches!(p, Push::NoMatch) && ever_scrolled {
+                            // The step jumped past the last frame (scroll acceleration, a short
+                            // viewport) or the content changed. Go back to where it overlapped and
+                            // continue with smaller steps; give up only when the steps cannot shrink.
+                            let can_shrink = if pixel_mode { px_step > 30.0 } else { step > 1 };
+                            let _ = scroll_step(s, pixel_mode, -1);
+                            if let Ok(f) = grab_settled(region, Duration::from_millis(900)) {
+                                let prev = stitcher.last_frame().cloned();
+                                let p = stitcher.push(f.clone());
+                                debug.record_pair(&stitcher, p, prev, f);
+                                last_push = Some(p);
+                            }
+                            if can_shrink {
+                                if pixel_mode { px_step = (px_step / 2.0).max(25.0); } else { step = (step / 2).max(1); }
+                                tracing::info!("automatic scrolling: overshot, stepping back; now {} per step", if pixel_mode { format!("{px_step} px") } else { format!("{step} notches") });
+                                if !slowed_down { slowed_down = true; let _ = etx.send(Event::Warning("Scrolling in smaller steps so nothing is skipped".into())); }
+                            } else if stitcher.misses() > 0 {
+                                let _ = etx.send(Event::Warning("Automatic scrolling lost the page and stopped. Scroll on by hand, or press Done.".into()));
+                                auto = false;
+                            }
+                        }
                         if unchanged_after_scroll >= 2 {
                             if ever_scrolled {
                                 // It scrolled before and stopped moving: the end of the content.
@@ -259,6 +376,10 @@ fn run(region: Rect, opts: ScrollOptions, paused: bool, etx: Sender<Event>, crx:
             }
         }
         let _ = etx.send(Event::Progress { frames: stitcher.frames, accepted: stitcher.accepted(), length: stitcher.length(), last: last_push, axis: stitcher.axis(), auto, misses: stitcher.misses() });
+    }
+    if !cancelled && stitcher.misses() > 0 && stitcher.accepted() > 0 {
+        // The last frames could not be joined to the capture: what was on screen at the end is missing.
+        let _ = etx.send(Event::Warning("The last part you scrolled to could not be joined and is not in the capture (it scrolled too far from the previous frame).".into()));
     }
     let img = if cancelled { None } else { stitcher.finish() };
     debug.finish(&stitcher, img.as_ref());

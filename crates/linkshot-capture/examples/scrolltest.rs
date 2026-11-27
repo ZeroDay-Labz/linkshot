@@ -41,6 +41,7 @@ fn main() -> anyhow::Result<()> {
             Ok(Event::AutoFinished) => { println!("auto-scroll finished"); session.send(Command::Finish); }
             Ok(Event::RestoreToken(_)) => println!("(portal restore token received)"),
             Ok(Event::Error(e)) => println!("error: {e}"),
+            Ok(Event::Warning(w)) => println!("warning: {w}"),
             Ok(Event::Done(img)) => {
                 match img { Some(img) => { img.save(&out)?; println!("saved {out} ({}x{})", img.width(), img.height()); } None => println!("no image") }
                 break;

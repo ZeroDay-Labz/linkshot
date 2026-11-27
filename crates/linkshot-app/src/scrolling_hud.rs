@@ -27,6 +27,8 @@ pub struct ScrollingUi {
     pub finishing: bool,
     pub error: Option<String>,
     pub new_error: Option<String>,
+    /// Latest non-fatal notice (automatic scrolling slowed down, the end could not be joined).
+    pub warning: Option<(String, std::time::Instant)>,
     pub new_token: Option<String>,
     /// Set when the session reports its final image (`Some(None)` = cancelled).
     pub result: Option<Option<image::RgbaImage>>,
@@ -42,7 +44,7 @@ pub const HUD_TITLE: &str = "LinkShot Scrolling Capture";
 
 impl ScrollingUi {
     pub fn new(session: Session, settings: CaptureSettings, region: linkshot_core::Rect, monitor: linkshot_core::Rect, auto: bool, started: bool) -> Self {
-        Self { session, settings, region, monitor, started, auto, frames: 0, accepted: 0, length: 0, axis: None, last: None, finishing: false, error: None, new_error: None, new_token: None, result: None, hud_rect_sent: false, misses: 0, ui_frames: 0, placed: false, drag_sent: false }
+        Self { session, settings, region, monitor, started, auto, frames: 0, accepted: 0, length: 0, axis: None, last: None, finishing: false, error: None, new_error: None, warning: None, new_token: None, result: None, hud_rect_sent: false, misses: 0, ui_frames: 0, placed: false, drag_sent: false }
     }
 
     /// Where the toolbar goes: centred under the region, or above it when there is no room (logical px).
@@ -74,6 +76,7 @@ impl ScrollingUi {
                 Event::AutoFinished => { self.auto = false; self.finish(); }
                 Event::RestoreToken(t) => self.new_token = Some(t),
                 Event::Error(e) => { self.error = Some(e.clone()); self.new_error = Some(e); }
+                Event::Warning(w) => self.warning = Some((w, std::time::Instant::now())),
                 Event::Done(img) => self.result = Some(img),
             }
         }
@@ -119,14 +122,18 @@ impl ScrollingUi {
                 ("Stitching…".to_string(), format!("{} px", self.length))
             } else if !self.started {
                 ("Ready to capture".to_string(), "Press Start, then scroll the content".to_string())
-            } else if self.misses >= 4 {
-                ("Lost the overlap".to_string(), "Scroll back a little so the last frame is visible again".to_string())
+            } else if self.misses >= 3 && !self.auto {
+                ("Scrolled too far".to_string(), "Scroll back a little so nothing is skipped".to_string())
             } else if self.auto {
                 ("Automatic scrolling…".to_string(), Self::progress_text(self.accepted, self.length, self.axis))
             } else {
                 ("Scroll the content, then press Done".to_string(), Self::progress_text(self.accepted, self.length, self.axis))
             };
-            let lost = self.misses >= 4 && !self.finishing;
+            let lost = self.misses >= 3 && !self.auto && !self.finishing;
+            // A recent notice replaces the progress line for a few seconds.
+            let notice = self.warning.as_ref().filter(|(_, t)| t.elapsed().as_secs_f32() < 4.0).map(|(w, _)| w.clone());
+            let sub = if lost { sub } else { notice.clone().unwrap_or(sub) };
+            let lost = lost || notice.is_some();
             painter.circle_filled(Pos2::new(panel.left() + 26.0, panel.center().y), 6.0, if self.finishing { pal.green } else if lost { orange } else if self.started { pal.capture_red } else { orange });
             painter.text(Pos2::new(panel.left() + 40.0, panel.center().y - 9.0), Align2::LEFT_CENTER, &title, crate::theme::medium(13.0), pal.text_bright);
             painter.text(Pos2::new(panel.left() + 40.0, panel.center().y + 9.0), Align2::LEFT_CENTER, self.error.clone().unwrap_or(sub), FontId::proportional(11.5), if self.error.is_some() { pal.capture_red } else if lost { orange } else { pal.text });

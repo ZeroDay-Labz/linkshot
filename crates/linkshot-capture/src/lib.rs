@@ -18,6 +18,8 @@ pub mod kwin {
     pub fn focus_away_from(_caption: &str) -> Result<()> { bail!("not running under KWin") }
 }
 #[cfg(target_os = "linux")]
+pub mod a11y_scroll;
+#[cfg(target_os = "linux")]
 pub mod portal;
 #[cfg(target_os = "linux")]
 pub mod screencast;

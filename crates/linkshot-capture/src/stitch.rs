@@ -173,6 +173,9 @@ fn blank_overlap(prev_hash: &[u64], cur_hash: &[u64], top: usize, bottom: usize)
 
 /// Number of column blocks a row is reduced to for [`coarse_offset`].
 const COARSE_BLOCKS: usize = 48;
+/// Column blocks that count towards a coarse offset's error: the best-fitting 60 %, so up to 40 % of
+/// the width may change between frames by itself.
+const COARSE_KEEP: usize = COARSE_BLOCKS * 3 / 5;
 
 /// Each row of `[top, bottom)` reduced to the mean brightness of `COARSE_BLOCKS` column blocks
 /// (central band only). Averaging over a block cancels per-pixel noise.
@@ -193,8 +196,9 @@ fn row_profiles(g: &Gray, top: usize, bottom: usize) -> Vec<[f32; COARSE_BLOCKS]
 }
 
 /// Fallback for content the exact row matcher cannot place: photographs, gradients, frames with
-/// per-pixel noise (video, compression), where no row repeats exactly. Every offset with a large
-/// enough overlap is scored by the mean difference of block-averaged rows. An offset is accepted
+/// per-pixel noise (video, compression), content re-rendered at fractional scaling, or pages with an
+/// animation playing somewhere, where no row repeats exactly. Works on either axis (transpose
+/// first). Every offset with a large enough overlap is scored by the mean difference of block-averaged rows. An offset is accepted
 /// only when it fits well in absolute terms *and* clearly beats every offset that is not its
 /// neighbour; anything ambiguous returns None, so the frame is dropped rather than guessed.
 fn coarse_offset(prev: &Gray, cur: &Gray, top: usize, bottom: usize, prior: Option<i32>) -> Option<i32> {
@@ -212,16 +216,21 @@ fn coarse_offset(prev: &Gray, cur: &Gray, top: usize, bottom: usize, prior: Opti
     let mut errs: Vec<(i32, f32)> = Vec::with_capacity((2 * max_dy + 1) as usize);
     for dy in -max_dy..=max_dy {
         let (c0, c1) = if dy >= 0 { (0usize, band - dy as usize) } else { ((-dy) as usize, band) };
-        let mut sum = 0.0f32;
+        // Per column block, so a region that changes on its own (a playing video, an animation, a
+        // blinking cursor) only spoils its own columns; the error is the mean over the best-fitting
+        // COARSE_KEEP of them.
+        let mut col = [0.0f32; COARSE_BLOCKS];
         let mut n = 0usize;
         let mut y = c0;
         while y < c1 {
             let (a, b) = (&cp[y], &pp[(y as i32 + dy) as usize]);
-            for k in 0..COARSE_BLOCKS { sum += (a[k] - b[k]).abs(); }
-            n += COARSE_BLOCKS;
+            for k in 0..COARSE_BLOCKS { col[k] += (a[k] - b[k]).abs(); }
+            n += 1;
             y += step;
         }
-        errs.push((dy, sum / n.max(1) as f32));
+        col.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let sum: f32 = col[..COARSE_KEEP].iter().sum();
+        errs.push((dy, sum / (n.max(1) * COARSE_KEEP) as f32));
     }
     let bi = errs.iter().enumerate().min_by(|a, b| a.1 .1.partial_cmp(&b.1 .1).unwrap_or(std::cmp::Ordering::Equal))?.0;
     let (best_dy, best) = errs[bi];
@@ -239,7 +248,9 @@ fn coarse_offset(prev: &Gray, cur: &Gray, top: usize, bottom: usize, prior: Opti
     if std::env::var_os("LINKSHOT_STITCH_DEBUG").is_some() { eprintln!("  coarse: best dy={best_dy} err={best:.2} runner-up={runner_up:.2} dip={dip:.2} prior={prior:?}"); }
     // Noise of ±a levels averages to well under 1 level per block; a wrong offset on real content
     // differs by many levels.
-    if best > 2.5 || dip < 0.4 || runner_up < best * 1.5 + 1.0 { return None; }
+    // The dip has to stand out from the noise floor too: on smooth gradients a wrong offset with a
+    // small overlap can fit almost as well as the noise allows, but its curve around it is shallow.
+    if best > 2.5 || dip < 0.4 || dip < best * 0.35 || runner_up < best * 1.5 + 1.0 { return None; }
     Some(best_dy)
 }
 
@@ -385,9 +396,13 @@ impl Stitcher {
             let ct = cur.transposed();
             if let Some(m) = find_offset(&pt, &ct, 0, pt.h, prior) { result = Some((Axis::Horizontal, m.dy)); }
         }
-        // Neither axis matched exactly: try the noise-tolerant comparison (vertical scrolling only).
+        // Neither axis matched exactly: try the noise-tolerant comparison.
         if result.is_none() && try_vertical {
             if let Some(dy) = coarse_offset(prev, &cur, self.static_top, h - self.static_bottom, prior) { result = Some((Axis::Vertical, dy)); }
+        }
+        if result.is_none() && try_horizontal {
+            let (pt, ct) = (prev.transposed(), cur.transposed());
+            if let Some(dx) = coarse_offset(&pt, &ct, 0, pt.h, prior) { result = Some((Axis::Horizontal, dx)); }
         }
         // Sticky header/footer: rows that stay identical although the content scrolled. Learned from
         // scrolled frames only; keep the smallest seen so coincidences get corrected later.
@@ -868,5 +883,73 @@ mod noisy_tests {
         let mut st = Stitcher::new();
         assert_eq!(st.push(noisy(&image::imageops::crop_imm(&a, 0, 0, w, vh).to_image(), 1, 7)), Push::First);
         assert_eq!(st.push(noisy(&image::imageops::crop_imm(&b, 0, 100, w, vh).to_image(), 2, 7)), Push::NoMatch);
+    }
+
+    /// Text-like page (make_page) with a video/animation playing in a box on the left: the box differs
+    /// in every frame, the rest scrolls normally.
+    #[test]
+    fn stitches_around_animated_region() {
+        let (w, ph, vh) = (800u32, 5000u32, 700u32);
+        let page = crate::stitch::tests_helpers::make_page(w, ph, 7);
+        let mut st = Stitcher::new();
+        let mut scroll = 0u32;
+        let steps = [0u32, 180, 240, 120, 300, 210, 260];
+        for (i, step) in steps.iter().enumerate() {
+            scroll += step;
+            let mut f = image::imageops::crop_imm(&page, 0, scroll, w, vh).to_image();
+            // Animated box: 240 px wide, 70 % of the viewport tall, fixed on screen, new content each frame.
+            let anim = noisy(&RgbaImage::from_pixel(240, vh * 7 / 10, Rgba([90, 120, 160, 255])), 77 + i as u64, 90);
+            image::imageops::replace(&mut f, &anim, 40, (vh / 10) as i64);
+            let r = st.push(f);
+            if i == 0 { assert_eq!(r, Push::First); continue; }
+            match r { Push::Scrolled { axis: Axis::Vertical, offset, .. } => assert_eq!(offset, *step as i32, "frame {i}"), other => panic!("frame {i}: {other:?}") }
+        }
+    }
+
+    /// Fractional display scaling (e.g. 170 %): the content moves by a non-integer number of device
+    /// pixels, so every row is re-rendered between two source rows and nothing matches exactly.
+    #[test]
+    fn stitches_subpixel_scrolling() {
+        let (w, ph, vh) = (800u32, 5000u32, 700u32);
+        let page = crate::stitch::tests_helpers::make_page(w, ph, 11);
+        let sample = |pos: f32| {
+            let base = pos.floor() as u32; let fr = pos - pos.floor();
+            let mut f = RgbaImage::new(w, vh);
+            for y in 0..vh { for x in 0..w {
+                let a = page.get_pixel(x, base + y).0; let b = page.get_pixel(x, base + y + 1).0;
+                let mut c = [0u8; 4];
+                for k in 0..4 { c[k] = (a[k] as f32 * (1.0 - fr) + b[k] as f32 * fr).round() as u8; }
+                f.put_pixel(x, y, Rgba(c));
+            } }
+            f
+        };
+        let mut st = Stitcher::new();
+        let mut pos = 0.0f32;
+        let steps = [0.0f32, 170.3, 229.6, 141.1, 254.5, 198.8];
+        for (i, step) in steps.iter().enumerate() {
+            pos += step;
+            let r = st.push(sample(pos));
+            if i == 0 { assert_eq!(r, Push::First); continue; }
+            match r { Push::Scrolled { axis: Axis::Vertical, offset, .. } => assert!((offset as f32 - step).abs() <= 1.0, "frame {i}: {offset} vs {step}"), other => panic!("frame {i}: {other:?}") }
+        }
+        assert!((st.finish().unwrap().height() as f32 - (pos + vh as f32)).abs() <= 4.0);
+    }
+
+    /// Noisy content scrolled sideways (a wide photo, a timeline).
+    #[test]
+    fn stitches_noisy_horizontal_scroll() {
+        let (pw, h, vw) = (4000u32, 500u32, 700u32);
+        let tall = photo_page(h, pw);
+        let page = image::imageops::rotate90(&tall);
+        let mut st = Stitcher::new();
+        let mut scroll = 0u32;
+        let steps = [0u32, 160, 230, 190, 280];
+        for (i, step) in steps.iter().enumerate() {
+            scroll += step;
+            let f = noisy(&image::imageops::crop_imm(&page, scroll, 0, vw, h).to_image(), 500 + i as u64, 6);
+            let r = st.push(f);
+            if i == 0 { assert_eq!(r, Push::First); continue; }
+            match r { Push::Scrolled { axis: Axis::Horizontal, offset, .. } => assert_eq!(offset, *step as i32, "frame {i}"), other => panic!("frame {i}: {other:?}") }
+        }
     }
 }

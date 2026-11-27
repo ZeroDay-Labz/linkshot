@@ -112,7 +112,8 @@ pub struct EditorState {
     pub canvas_color_dialog: bool,
     pub tray_dirty: bool,
     pub gif_dialog: Option<video_view::GifDialog>,
-    pub export_job: Option<video_view::ExportJob>,
+    /// Running GIF/MP4 exports, oldest first (several may run at once).
+    pub export_jobs: Vec<video_view::ExportJob>,
     /// Wakes the UI loop from worker threads (players, exports).
     pub wake: std::sync::Arc<dyn Fn() + Send + Sync>,
 }
@@ -172,7 +173,7 @@ impl EditorState {
             canvas_color_dialog: false,
             tray_dirty: false,
             gif_dialog: None,
-            export_job: None,
+            export_jobs: Vec::new(),
             wake: std::sync::Arc::new(|| {}),
         }
     }
@@ -254,7 +255,7 @@ impl EditorState {
                     let has_audio = wav.is_file() && std::fs::rename(&wav, &master_wav).is_ok();
                     if let Some(v) = self.docs.last_mut().unwrap().video.as_mut() { v.master = Some(master.clone()); if has_audio { v.audio = Some(master_wav); } }
                     let format = if gif { video_view::ExportFormat::Gif(video_view::gif_options(&settings.gif_export, (None, None))) } else { video_view::ExportFormat::Mp4(video_view::mp4_options(settings, (None, None))) };
-                    self.export_job = Some(video_view::start_export(master, target, format, true, self.wake.clone()));
+                    self.export_jobs.push(video_view::start_export(master, target, format, true, self.wake.clone()));
                 }
             }
         }
@@ -346,14 +347,14 @@ impl EditorState {
                 }
                 output_ids::PROGRAM => {
                     let p = &settings.share_settings_program;
-                    match crate::share::temp_png(&mut self.renderer, doc, &app_settings.library_dir(paths).join("Program"), &doc.display_name()) {
+                    match crate::share::temp_png(&mut self.renderer, doc, &paths.cache_dir.join("share"), &doc.display_name()) {
                         Ok(path) => { if p.executable.is_empty() { let _ = linkshot_platform::open_path(&path); } else if let Err(e) = linkshot_platform::run_program(&p.executable, &p.parameters, &path) { self.set_status(format!("Program failed: {e}")); } }
                         Err(e) => self.set_status(format!("Share failed: {e:#}")),
                     }
                 }
                 output_ids::EMAIL => {
                     let e = &settings.share_settings_email;
-                    if let Ok(path) = crate::share::temp_png(&mut self.renderer, doc, &app_settings.library_dir(paths).join("Program"), &doc.display_name()) {
+                    if let Ok(path) = crate::share::temp_png(&mut self.renderer, doc, &paths.cache_dir.join("share"), &doc.display_name()) {
                         let body = if e.message_text.is_empty() { format!("Attached: {}", path.display()) } else { format!("{}\n\n{}", e.message_text, path.display()) };
                         let _ = linkshot_platform::compose_email(&e.address, &e.subject, &body);
                         let _ = linkshot_platform::reveal(&path);

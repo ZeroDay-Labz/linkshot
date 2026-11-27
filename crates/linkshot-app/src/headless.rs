@@ -591,9 +591,9 @@ pub fn run_selftest() -> anyhow::Result<()> {
         let s = app.settings.clone();
         app.editor.add_recording(spool.clone(), &paths, &s)?;
         anyhow::ensure!(app.editor.current_doc().map(|d| d.is_video()).unwrap_or(false), "recording should open as a video document");
-        anyhow::ensure!(app.editor.export_job.is_some(), "auto-save should start a GIF export");
+        anyhow::ensure!(!app.editor.export_jobs.is_empty(), "auto-save should start a GIF export");
         let t0 = std::time::Instant::now();
-        while app.editor.export_job.is_some() && t0.elapsed().as_secs() < 30 { crate::editor::video_view::poll_export(&mut app, &ectx); std::thread::sleep(std::time::Duration::from_millis(20)); }
+        while !app.editor.export_jobs.is_empty() && t0.elapsed().as_secs() < 30 { crate::editor::video_view::poll_export(&mut app, &ectx); std::thread::sleep(std::time::Duration::from_millis(20)); }
         let gif = app.editor.current_doc().and_then(|d| d.doc.path.clone()).context("video was not saved")?;
         anyhow::ensure!(gif.extension().map(|e| e == "gif").unwrap_or(false) && gif.exists(), "expected a GIF in the library, got {}", gif.display());
         let master = crate::editor::video_view::master_for(&gif, &app.paths).context("master spool should sit next to the GIF name")?;

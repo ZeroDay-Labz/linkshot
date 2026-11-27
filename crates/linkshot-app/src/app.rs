@@ -226,6 +226,7 @@ impl App {
         if headless_dark.is_none() {
             // What an earlier update left behind (downloaded packages, the old Windows executable).
             std::thread::spawn(linkshot_platform::update::clean_up);
+            { let paths = app.paths.clone(); std::thread::Builder::new().name("housekeeping".into()).spawn(move || crate::housekeeping::run(paths)).ok(); }
             // Automatic update checks only when the user turned them on, at most once a day.
             let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
             if app.settings.check_updates_on_start && now - app.settings.last_update_check > 24 * 3600 {
@@ -655,15 +656,21 @@ impl App {
         });
         let token = sc.new_token.take();
         let error = sc.new_error.take();
-        if let Some(done) = sc.result.take() { outcome = Some((done, sc.settings.clone(), sc.frames)); }
+        if let Some(done) = sc.result.take() { outcome = Some((done, sc.settings.clone(), sc.frames, sc.warning.take().map(|w| w.0))); }
         if let Some(t) = token { self.settings.remote_desktop_token = Some(t); self.mark_settings_dirty(); }
         if let Some(e) = error { self.set_status(e); }
         match outcome {
             None => ctx.request_repaint_after(Duration::from_millis(80)),
-            Some((img, settings, frames)) => {
+            Some((img, settings, frames, warning)) => {
                 self.scrolling = None;
                 match img {
-                    Some(img) => { self.set_status(format!("Scrolling capture: stitched {frames} frames into {}×{} px.", img.width(), img.height())); self.finish_capture(ctx, img, None, &settings); }
+                    Some(img) => {
+                        let mut msg = format!("Scrolling capture: stitched {frames} frames into {}×{} px.", img.width(), img.height());
+                        // Only the end-of-capture notice matters once the capture is done.
+                        if let Some(w) = warning.filter(|w| w.starts_with("The last part")) { msg = format!("{msg} {w}"); }
+                        self.set_status(msg);
+                        self.finish_capture(ctx, img, None, &settings);
+                    }
                     None => self.restore_windows(ctx),
                 }
             }

@@ -130,6 +130,12 @@ pub fn remove_doc(app: &mut App, i: usize, delete_file: bool) {
             _ => return,
         }
     }
+    // A recording that was never saved exists only as its raw master: closing it discards it.
+    let unsaved_video = app.editor.docs[i].is_video() && app.editor.docs[i].doc.path.is_none();
+    if unsaved_video && !delete_file {
+        let ok = rfd::MessageDialog::new().set_title("Discard recording").set_description("This recording has not been saved. Discard it?").set_buttons(rfd::MessageButtons::YesNo).show();
+        if ok != rfd::MessageDialogResult::Yes { return; }
+    }
     if delete_file {
         if let Some(p) = &app.editor.docs[i].doc.path {
             if app.settings.prompt_for_delete {
@@ -138,6 +144,15 @@ pub fn remove_doc(app: &mut App, i: usize, delete_file: bool) {
             }
             let _ = std::fs::remove_file(p);
             if let Some(m) = super::video_view::master_for(p, &app.paths) { let _ = std::fs::remove_file(m.with_extension("wav")); let _ = std::fs::remove_file(m); }
+        }
+    }
+    if delete_file || unsaved_video {
+        // The raw master this document plays from, if it is one of our recordings (not a decode cache
+        // spool, which the cache limit takes care of).
+        let recordings = app.paths.recordings_dir();
+        if let Some(m) = app.editor.docs[i].video.as_ref().and_then(|v| v.master.clone()).filter(|m| m.parent() == Some(recordings.as_path())) {
+            let _ = std::fs::remove_file(m.with_extension("wav"));
+            let _ = std::fs::remove_file(m);
         }
     }
     app.editor.docs.remove(i);

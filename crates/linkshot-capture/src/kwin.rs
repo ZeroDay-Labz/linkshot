@@ -594,6 +594,28 @@ fn js_str(s: &str) -> String {
     out
 }
 
+/// The topmost normal window whose client area contains a point (logical desktop coordinates).
+pub struct WindowUnder { pub pid: u32, pub caption: String, pub x: f64, pub y: f64, pub width: f64, pub height: f64 }
+
+pub fn window_under(x: f64, y: f64) -> Result<WindowUnder> {
+    let text = run_probe(&format!(r#"
+const list = workspace.stackingOrder;
+let hit = null;
+for (let i = list.length - 1; i >= 0; i--) {{
+    const w = list[i];
+    if (!w || w.deleted || w.minimized || w.hidden || !(w.normalWindow || w.dialog || w.utility)) continue;
+    if (typeof w.onCurrentDesktop !== "undefined" && !w.onCurrentDesktop) continue;
+    const g = w.clientGeometry;
+    if ({x} >= g.x && {y} >= g.y && {x} < g.x + g.width && {y} < g.y + g.height) {{ hit = w; break; }}
+}}
+REPORT(hit ? [hit.pid, hit.clientGeometry.x, hit.clientGeometry.y, hit.clientGeometry.width, hit.clientGeometry.height, hit.caption].map(v => String(v).replace(/[\t\n]/g, " ")).join("\t") : "");
+"#))?;
+    let f: Vec<&str> = text.trim_end_matches('\n').split('\t').collect();
+    anyhow::ensure!(f.len() >= 6, "no window there");
+    let num = |i: usize| f[i].parse::<f64>().unwrap_or(0.0);
+    Ok(WindowUnder { pid: num(0) as u32, x: num(1), y: num(2), width: num(3), height: num(4), caption: f[5].to_string() })
+}
+
 /// Visible windows on the current desktop (bottom to top) from KWin's scripting API, for Window
 /// selection on Wayland where no other API lists other apps' windows.
 pub fn window_list() -> Result<Vec<crate::WindowInfo>> {

@@ -32,6 +32,8 @@ finish-args:
   - --talk-name=org.freedesktop.Flatpak
   - --talk-name=org.kde.StatusNotifierWatcher
   - --talk-name=org.freedesktop.Notifications
+  # Automatic scrolling through the accessibility bus (falls back to wheel events without it)
+  - --talk-name=org.a11y.Bus
   - --env=RUST_LOG=linkshot=info,warn
 build-options:
   append-path: /usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/llvm20/bin

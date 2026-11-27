@@ -2,7 +2,6 @@
 //! points), the "Create Animated GIF" dialog and background GIF/MP4 export jobs.
 
 use crate::app::App;
-use crate::icons;
 use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Vec2};
 use linkshot_core::settings::{GifExportSettings, GifPreset, Paths, Settings};
 use linkshot_video::{FrameSource, GifOptions, Mp4Options, Player, PlayerCmd, PlayerEvent, PlayerFrame, SpoolReader};
@@ -469,7 +468,7 @@ pub fn save_video_as(app: &mut App, i: usize, ext: &str) {
     app.mark_settings_dirty();
     let format = if chosen_ext == "gif" { ExportFormat::Gif(gif_options(&app.settings.gif_export, range)) } else { ExportFormat::Mp4(mp4_options(&app.settings, range)) };
     let wake = app.wake();
-    app.editor.export_job = Some(start_export(master, path, format, false, wake));
+    app.editor.export_jobs.push(start_export(master, path, format, false, wake));
 }
 
 /// Draws the GIF dialog; returns true while open.
@@ -540,23 +539,35 @@ pub fn gif_dialog_ui(app: &mut App, ctx: &egui::Context) {
             app.settings.last_save_folder = path.parent().map(|p| p.to_path_buf());
             let format = if path.extension().map(|e| e.eq_ignore_ascii_case("mp4")).unwrap_or(false) { ExportFormat::Mp4(mp4_options(&app.settings, d.range)) } else { ExportFormat::Gif(gif_options(&d.settings, d.range)) };
             let wake = app.wake();
-            app.editor.export_job = Some(start_export(d.doc_master.clone(), path, format, false, wake));
+            app.editor.export_jobs.push(start_export(d.doc_master.clone(), path, format, false, wake));
         }
         return;
     }
     if open && !cancel { app.editor.gif_dialog = Some(d); }
 }
 
-/// Polls the running export; on completion attaches the file to its document (or adds it to the
-/// tray) and refreshes the library.
+/// Polls the running exports; each finished one attaches its file to its document (or adds it to
+/// the tray) and refreshes the library.
 pub fn poll_export(app: &mut App, ctx: &egui::Context) {
-    let Some(job) = app.editor.export_job.as_mut() else { return };
-    let mut done: Option<anyhow::Result<PathBuf>> = None;
-    while let Ok(m) = job.rx.try_recv() {
-        match m { ExportMsg::Progress(p) => job.progress = p, ExportMsg::Done(r) => done = Some(r) }
+    if app.editor.export_jobs.is_empty() { return; }
+    let mut finished = Vec::new();
+    let mut i = 0;
+    while i < app.editor.export_jobs.len() {
+        let job = &mut app.editor.export_jobs[i];
+        let mut done: Option<anyhow::Result<PathBuf>> = None;
+        while let Ok(m) = job.rx.try_recv() {
+            match m { ExportMsg::Progress(p) => job.progress = p, ExportMsg::Done(r) => done = Some(r) }
+        }
+        match done {
+            Some(res) => finished.push((app.editor.export_jobs.remove(i), res)),
+            None => i += 1,
+        }
     }
-    let Some(res) = done else { ctx.request_repaint_after(std::time::Duration::from_millis(200)); return };
-    let job = app.editor.export_job.take().unwrap();
+    if !app.editor.export_jobs.is_empty() { ctx.request_repaint_after(std::time::Duration::from_millis(200)); }
+    for (job, res) in finished { finish_export(app, job, res); }
+}
+
+fn finish_export(app: &mut App, job: ExportJob, res: anyhow::Result<PathBuf>) {
     match res {
         Ok(path) => {
             let idx = job.master.as_ref().and_then(|m| app.editor.docs.iter().position(|d| d.video.as_ref().and_then(|v| v.master.as_ref()) == Some(m)));
@@ -564,11 +575,24 @@ pub fn poll_export(app: &mut App, ctx: &egui::Context) {
             let kind = if ext == "gif" { linkshot_core::enums::TrayItemType::AnimatedGif } else { linkshot_core::enums::TrayItemType::Video };
             match idx {
                 Some(i) if app.editor.docs[i].doc.path.is_none() || job.autosave => {
+                    let recordings = app.paths.recordings_dir();
                     let d = &mut app.editor.docs[i];
                     d.doc.path = Some(path.clone());
                     d.kind = kind;
                     d.saved_version = d.version;
-                    if let Some(v) = d.video.as_mut() { v.file = Some(path.clone()); }
+                    if let Some(v) = d.video.as_mut() {
+                        v.file = Some(path.clone());
+                        // A fresh recording's master is still called `recording-<time>`; name it after the
+                        // saved file so it is found again after a restart (and cleaned up with it).
+                        if let (Some(m), Some(stem)) = (v.master.clone(), path.file_stem()) {
+                            let named = recordings.join(format!("{}.lsv", stem.to_string_lossy()));
+                            let fresh = m.parent() == Some(recordings.as_path()) && m.file_name().is_some_and(|n| n.to_string_lossy().starts_with("recording-"));
+                            if fresh && !named.exists() && std::fs::rename(&m, &named).is_ok() {
+                                if std::fs::rename(m.with_extension("wav"), named.with_extension("wav")).is_ok() { v.audio = Some(named.with_extension("wav")); }
+                                v.master = Some(named);
+                            }
+                        }
+                    }
                 }
                 _ => {
                     // The exported file goes in the tray next to the original.
@@ -600,19 +624,20 @@ pub fn human_size(bytes: u64) -> String {
     if bytes >= 1 << 20 { format!("{:.1} MB", bytes as f64 / (1u64 << 20) as f64) } else { format!("{} KB", (bytes + 1023) / 1024) }
 }
 
-/// Progress toast for the running export.
+/// Progress toast for the running exports (the oldest one, plus how many more are queued).
 pub fn export_progress_ui(app: &App, ui: &mut egui::Ui, canvas_rect: Rect, ctx: &egui::Context) {
-    let Some(job) = app.editor.export_job.as_ref() else { return };
+    let Some(job) = app.editor.export_jobs.first() else { return };
+    let more = app.editor.export_jobs.len() - 1;
+    let label = if more > 0 { format!("{}  (+{more} more)", job.label) } else { job.label.clone() };
     let pal = app.pal;
     let r = Rect::from_center_size(Pos2::new(canvas_rect.center().x, canvas_rect.top() + 36.0), Vec2::new(360.0, 44.0));
     ui.painter().rect_filled(r.translate(Vec2::new(0.0, 3.0)), 8.0, Color32::from_black_alpha(80));
     ui.painter().rect_filled(r, 8.0, pal.dark_panel);
     ui.painter().rect_stroke(r, 8.0, Stroke::new(1.0_f32, pal.control_outline), egui::StrokeKind::Inside);
-    ui.painter().text(Pos2::new(r.left() + 14.0, r.top() + 14.0), Align2::LEFT_CENTER, &job.label, FontId::proportional(12.5), pal.text_bright);
+    ui.painter().text(Pos2::new(r.left() + 14.0, r.top() + 14.0), Align2::LEFT_CENTER, &label, FontId::proportional(12.5), pal.text_bright);
     let bar = Rect::from_min_max(Pos2::new(r.left() + 14.0, r.bottom() - 14.0), Pos2::new(r.right() - 14.0, r.bottom() - 8.0));
     ui.painter().rect_filled(bar, 3.0, pal.control_dark);
     ui.painter().rect_filled(Rect::from_min_max(bar.min, Pos2::new(bar.left() + bar.width() * job.progress.clamp(0.0, 1.0), bar.bottom())), 3.0, pal.product);
-    let _ = icons::camera_icon;
     ctx.request_repaint_after(std::time::Duration::from_millis(100));
 }
 

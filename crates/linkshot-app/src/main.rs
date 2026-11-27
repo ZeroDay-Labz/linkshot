@@ -8,6 +8,7 @@ mod capture_window;
 mod editor;
 mod headless;
 mod hotkeys;
+mod housekeeping;
 mod icons;
 mod keepalive;
 mod overlay;
