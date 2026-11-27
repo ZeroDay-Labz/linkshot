@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.3 — 2026-11-27
+
+- **Print Screen works on KDE Plasma.** The key used to be bound to an action of LinkShot's desktop
+  file; KDE stores such a binding but never listens for the key, so pressing Print did nothing. Print
+  now goes to the running LinkShot's global shortcut (LinkShot starts at login and stays in the tray),
+  and existing setups are moved over automatically.
+- **Faster capture start.** LinkShot no longer waits for its own windows to disappear when none is
+  showing: from the tray, the capture overlay appears about 100 ms after the key press (was ~400 ms).
+- **Hotkey fields:** pressing a key the desktop delivers to LinkShot (Print Screen, or another of
+  LinkShot's hotkeys) while a field is listening fills in the field instead of starting a capture.
+- **Readable hotkeys:** `Ctrl+;`, `Ctrl+'`, `Ctrl+/`, `Ctrl+Page Up`, `Super` instead of internal
+  key names such as `Oem1`.
+
 ## 0.5.2 — 2026-11-27
 
 - **Setting Print Screen as a hotkey works.** The key cannot be pressed into a hotkey field (the
