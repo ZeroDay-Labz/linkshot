@@ -46,16 +46,19 @@ desktops) and on Windows:
 * **Screenshot** a region, window, full screen, fixed region or the clipboard, with the cursor, a delay,
   an interval or a schedule, from a frozen-screen overlay that spans every monitor.
 * **Scrolling screenshot** of whole web pages, documents and long lists, stitched pixel-exactly at native
-  resolution, sticky headers and footers handled.
+  resolution, sticky headers and footers handled, animations and fractional scaling tolerated, and
+  nothing skipped: automatic scrolling backs up and slows down when a step goes too far.
 * **Screen recorder** to animated GIF or MP4 with microphone, system audio ("what you hear"), a webcam
   overlay and Screen Draw annotations; pause, resume, in/out points, lossless master kept for re-export.
 * **OCR / grab text** from any part of the screen with the bundled Tesseract.
 * **Image editor** with arrows, callouts, shapes, text, steps, stamps, highlights, blur, magnify, crop,
   cut out (remove a band and join the rest with a torn, wave or seamless seam), effects, quick styles
-  and undo, where annotations stay editable objects. Captures are saved as `.snagx`
+  **Simplify** (turn an interface screenshot into a clean schematic), **Combine Images** and templates
+  (side by side, grid, before/after, numbered steps) and undo, where annotations stay editable objects. Captures are saved as `.snagx`
   (an open zip container with JSON pages, so existing `.snagx` libraries open in LinkShot) or exported as PNG, JPG,
   GIF, WebP, TIFF, BMP and ICO.
-* **Share** to file, clipboard, email, printer or any program, with presets, hotkeys and a tray icon.
+* **Share** to file, clipboard, email, printer, any program, **Imgur** or your own **Nextcloud** (link
+  copied to the clipboard), with presets, hotkeys and a tray icon.
 
 ## What it does
 
@@ -70,7 +73,9 @@ desktops) and on Windows:
   the page yourself or press *Auto-scroll*, then *Done*. Frames are grabbed at native resolution and
   stitched pixel-exactly: sticky headers/footers kept once, pinned toolbars kept at their real position,
   scrollbars ignored, upward and horizontal scrolling supported, and a frame that overlaps nothing is
-  reported ("Lost the overlap – scroll back a little") rather than guessed at.
+  reported ("Scrolled too far – scroll back a little") rather than guessed at. On KDE, *Auto-scroll*
+  moves the view's own scroll bar through the accessibility interface where the app exposes it
+  (exact steps, exact end, no input permission), and uses wheel events elsewhere.
 * **Video recording**: *Video* in the HUD or the Video tab, Record / Pause / Stop toolbar with countdown and a
   frame around the region, Shift+F9 pause / Shift+F10 stop. Frames are grabbed at native resolution at
   10/20/30 fps with the pointer and spooled losslessly. **Microphone and system audio** ("what you hear")

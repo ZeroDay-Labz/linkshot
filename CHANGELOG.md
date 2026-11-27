@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.8.0 — 2026-11-27
+
+- **Upload to Imgur and Nextcloud.** Both are in every Share menu and can be a preset's destination.
+  The link is copied to the clipboard when the upload finishes; Preferences ▸ Sharing accounts lists
+  recent uploads with Copy link and (for Imgur) Delete. Nextcloud logs in through your browser
+  (Login Flow v2): LinkShot receives an app password and keeps it in the system keyring, never in its
+  settings file. Uploads go to a folder of your choice, with a public link if you want one. Imgur uploads
+  are anonymous.
+- **Simplify** (Editor toolbar): turns an interface screenshot into a clean schematic — panels in flat
+  colours, text as rounded bars, pictures as placeholders — in the image's own colours or in light or
+  dark greys, with a detail slider. Everything it adds is an ordinary shape (recolour, move, delete);
+  one Undo removes it all. Detection takes milliseconds and needs no text recognition.
+- **Combine Images and templates** (Image ▸ Combine Images…, Create ▸ Image from Template): puts
+  captures from the tray into one image side by side, stacked, in a grid, as a labelled before/after
+  pair or as numbered steps. Images, labels and step numbers stay editable.
+
 ## 0.7.0 — 2026-11-27
 
 Scrolling capture:
