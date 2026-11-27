@@ -2,6 +2,7 @@
 
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+mod about;
 mod app;
 mod capture_window;
 mod editor;

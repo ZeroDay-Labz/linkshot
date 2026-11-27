@@ -303,6 +303,17 @@ pub fn run_shots(dir: &std::path::Path, files: &[std::path::PathBuf], dark: bool
         let img = render_frame(&gctx, &mut renderer, gsize, 2.0, bg, |ctx| gt.ui(ctx, &pal));
         img.save(dir.join("grab_text_results.png"))?;
     }
+    // About window.
+    {
+        let actx = egui::Context::default();
+        crate::theme::apply(&actx, &app.pal);
+        let mut about = crate::about::About::default(); about.renderer = "wgpu · Vulkan · AMD Radeon RX 6900 XT (RADV NAVI21) (radv)".into();
+        let pal = app.pal;
+        let size = egui::vec2(crate::about::SIZE[0], crate::about::SIZE[1]);
+        for _ in 0..3 { let mut open = true; let _ = render_frame(&actx, &mut renderer, size, 1.5, bg, |ctx| { let _ = about.ui(ctx, &pal, &mut open); }); }
+        let mut open = true;
+        render_frame(&actx, &mut renderer, size, 1.5, bg, |ctx| { let _ = about.ui(ctx, &pal, &mut open); }).save(dir.join("about.png"))?;
+    }
     // Update window states.
     for which in ["available", "downloading", "installed"] {
         let uctx = egui::Context::default();

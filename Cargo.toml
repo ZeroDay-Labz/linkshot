@@ -16,7 +16,7 @@ members = [
 version = "0.6.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/echo/linkshot"
+repository = "https://github.com/ZeroDay-Labz/linkshot"
 
 [workspace.dependencies]
 linkshot-core = { path = "crates/linkshot-core" }

@@ -1280,16 +1280,6 @@ fn dialogs(app: &mut App, ctx: &egui::Context, actions: &mut Vec<Action>) {
         egui::Window::new("Resize Image").collapsible(false).resizable(false).open(&mut open).anchor(Align2::CENTER_CENTER, [0.0, 0.0]).show(ctx, |ui| { resize_popup(app, ui); });
         if !open || app.editor.current.is_none() { app.editor.size_popup = false; }
     }
-    if app.show_about {
-        egui::Window::new("About LinkShot").collapsible(false).resizable(false).show(ctx, |ui| {
-            ui.heading("LinkShot");
-            ui.label(format!("Version {}", env!("CARGO_PKG_VERSION")));
-            ui.label("Screen capture, scrolling capture, video recording and an image editor for Linux and Windows.");
-            ui.hyperlink("https://github.com/ZeroDay-Labz/linkshot");
-            if let Some(e) = &app.hotkeys.error { ui.label(egui::RichText::new(e).small().color(pal.input_secondary)); }
-            if ui.button("Close").clicked() { app.show_about = false; }
-        });
-    }
     if app.show_prefs { preferences_window(app, ctx, actions); }
 }
 

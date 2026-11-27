@@ -106,6 +106,8 @@ pub struct App {
     pub pending_hotkey_input: Option<linkshot_core::presets::HotKey>,
     /// "Check for Updates" window and worker.
     pub updater: crate::updates::Updater,
+    /// Help ▸ About LinkShot.
+    pub about: crate::about::About,
     /// When the current capture was triggered (for the timing log).
     pub capture_t0: Option<Instant>,
     /// First-run question: make LinkShot the system's screenshot tool (Print Screen).
@@ -192,6 +194,7 @@ impl App {
             prefs_hotkey_editing: None,
             pending_hotkey_input: None,
             updater: Default::default(),
+            about: Default::default(),
             capture_t0: None,
             show_about: false,
             show_default_prompt: false,
@@ -861,7 +864,13 @@ impl App {
 impl eframe::App for App {
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] { [0.0, 0.0, 0.0, 0.0] }
 
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        if self.about.renderer.is_empty() {
+            self.about.renderer = if let Some(rs) = frame.wgpu_render_state() {
+                let i = rs.adapter.get_info();
+                format!("wgpu · {:?} · {} ({})", i.backend, i.name, i.driver)
+            } else if frame.gl().is_some() { "OpenGL (glow)".into() } else { "unknown".into() };
+        }
         tracing::trace!("update pass {}", ctx.cumulative_pass_nr());
         // LINKSHOT_FRAME_LOG=1: log how long the UI loop went without running while a window was
         // shown and input was arriving (responsiveness diagnostics).
@@ -1006,6 +1015,14 @@ impl eframe::App for App {
                     });
                 }
             }
+        }
+
+        // Help ▸ About LinkShot.
+        if self.show_about {
+            let pal = self.pal;
+            let mut open = true;
+            if let Some(crate::about::Request::CheckForUpdates) = self.about.ui(ctx, &pal, &mut open) { self.check_for_updates(true); }
+            if !open { self.show_about = false; }
         }
 
         // Update window (bottom-right of the primary monitor).
