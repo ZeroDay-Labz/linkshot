@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.2 — 2026-11-27
+
+- **Setting Print Screen as a hotkey works.** The key cannot be pressed into a hotkey field (the
+  toolkit has no Print Screen key and the desktop grabs it first), so a listening field now shows a
+  **PrtSc** chip; hold Ctrl/Alt/Shift while clicking it to combine. Choosing plain Print Screen as the
+  capture hotkey makes LinkShot the system screenshot tool, so the key actually reaches it.
+- **Scrolling capture of photos and noisy content.** Pages without sharp, repeating rows (photos,
+  gradients, video, compression noise) used to drop every frame; they now stitch exactly. Ambiguous
+  frames are still dropped rather than guessed.
+- **Automatic scrolling recovers** when a window ignores wheel steps: it re-aims and switches to
+  smooth scrolling, and tells you if the window still does not scroll, instead of finishing with a
+  single frame. It also waits briefly for lazily loaded content before grabbing a blank strip.
+- The installed package points the login autostart entry at itself.
+
 ## 0.5.1 — 2026-11-27
 
 - **Print Screen works again on Wayland.** Outside the Flatpak, LinkShot identified itself to the
