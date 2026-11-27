@@ -175,11 +175,17 @@ fn blank_overlap(prev_hash: &[u64], cur_hash: &[u64], top: usize, bottom: usize)
 /// least 8 rows identical at the same screen position in both frames, containing real content
 /// (at least two rows that are not flat). Isolated identical rows — blank lines that happen to
 /// coincide — are not pinned, so they keep counting as real content.
-fn pinned_rows(prev: &Gray, cur: &Gray, top: usize, bottom: usize) -> Vec<bool> {
+fn pinned_rows(prev: &Gray, cur: &Gray, top: usize, bottom: usize, dy: i32) -> Vec<bool> {
     let h = cur.h;
     // A pinned element may not span the whole width (a code block narrower than the page): a row
-    // counts as the same when nearly all of its columns agree.
-    let same: Vec<bool> = (0..h).map(|y| y >= top && y < bottom && row_same_fraction(prev.row(y), cur.row(y)) >= 0.96).collect();
+    // counts as the same when nearly all of its columns agree. It is only evidence of pinning when
+    // the content scrolling through that position would have looked different (cur[y] should have
+    // been prev[y + dy]); rows that look alike either way (mostly background) prove nothing.
+    let same: Vec<bool> = (0..h).map(|y| {
+        if y < top || y >= bottom || row_same_fraction(prev.row(y), cur.row(y)) < 0.96 { return false; }
+        let sy = y as i64 + dy as i64;
+        sy < 0 || sy >= prev.h as i64 || row_same_fraction(prev.row(y), prev.row(sy as usize)) < 0.96
+    }).collect();
     let mut pinned = vec![false; h];
     let mut y = 0;
     while y < h {
@@ -333,7 +339,7 @@ impl Stitcher {
                 // Rows identical at the same screen position in both frames although the content
                 // moved are pinned elements; flag them in both frames.
                 let pinned: Vec<bool> = if ax == Axis::Vertical && off.abs() >= 3 {
-                    pinned_rows(prev, &cur, self.static_top, self.h as usize - self.static_bottom)
+                    pinned_rows(prev, &cur, self.static_top, self.h as usize - self.static_bottom, off)
                 } else { Vec::new() };
                 if let Some(last) = self.strips.last_mut() {
                     if last.pinned.len() != pinned.len() { last.pinned = pinned.clone(); }
@@ -369,7 +375,48 @@ impl Stitcher {
         let new_min = pos.min(min);
         let added = ((new_max - max) + (min - new_min)) as u32;
         self.strips.push(Strip { img: frame, pos, pinned });
+        self.compact();
         added
+    }
+
+    /// Drops a strip whose body is entirely covered by the bodies of its neighbours, so memory grows
+    /// with the stitched length instead of with the number of frames (smooth scrolling yields a frame
+    /// every few pixels). The candidate is the third-newest strip: its own and both neighbours'
+    /// pinned-row flags are final by then (a strip's flags are completed when the next one arrives).
+    /// Strips with pinned rows are kept, because they decide where real content is recovered from.
+    /// The first strip (header source) and the last one (footer source) are never dropped. Coverage
+    /// is checked with the current sticky bands; those only shrink, which widens every body by the
+    /// same rows, so a strip covered now stays covered.
+    fn compact(&mut self) {
+        let n = self.strips.len();
+        if n < 4 { return; }
+        // After a removal the strip before it has a new neighbour and may have become redundant too.
+        let mut k = n - 3;
+        while k > 0 && self.drop_if_redundant(k) { k -= 1; }
+    }
+
+    fn drop_if_redundant(&mut self, k: usize) -> bool {
+        let (a, b, c) = (&self.strips[k - 1], &self.strips[k], &self.strips[k + 1]);
+        let (lo, hi) = match self.axis {
+            Some(Axis::Horizontal) => (0i64, self.w as i64),
+            _ => (self.static_top as i64, self.h as i64 - self.static_bottom as i64),
+        };
+        if hi <= lo { return false; }
+        let pinned = |s: &Strip, y: i64| s.pinned.get(y as usize).copied().unwrap_or(false);
+        // Row `y` of `b` shows canvas position b.pos + y. It is redundant when a neighbour shows the
+        // same position in its body; a real-content row needs a real-content row in the neighbour
+        // (a pinned overlay there would not reproduce it).
+        let covered_by = |s: &Strip, p: i64, need_real: bool| {
+            let y = p - s.pos;
+            y >= lo && y < hi && (!need_real || !pinned(s, y))
+        };
+        let redundant = (lo..hi).all(|y| {
+            let p = b.pos + y;
+            let need_real = !pinned(b, y);
+            covered_by(a, p, need_real) || covered_by(c, p, need_real)
+        });
+        if redundant { self.strips.remove(k); }
+        redundant
     }
 
     /// Assembles the final image. Static top/bottom bands (vertical) come from the first frame
@@ -650,3 +697,30 @@ mod tests {
     }
 }
 
+
+#[cfg(test)]
+mod memory_tests {
+    use super::*;
+    use super::tests_helpers::*;
+
+    /// Smooth scrolling in small steps must not keep every frame: memory has to stay proportional
+    /// to the stitched length, not to the number of frames grabbed.
+    #[test]
+    fn small_steps_keep_few_strips() {
+        let (w, ph, vh) = (800u32, 12000u32, 700u32);
+        let page = make_page(w, ph, 5);
+        let mut st = Stitcher::new();
+        let mut scroll = 0u32;
+        while scroll + vh < ph {
+            let f = image::imageops::crop_imm(&page, 0, scroll, w, vh).to_image();
+            st.push(f);
+            scroll = (scroll + 17).min(ph - vh);
+            if scroll + vh >= ph { break; }
+        }
+        let out = st.finish().unwrap();
+        let page_part = image::imageops::crop_imm(&page, 0, 0, w, out.height()).to_image();
+        assert!(out.pixels().zip(page_part.pixels()).all(|(a, b)| a == b), "stitched pixels differ from the page");
+        eprintln!("frames {} strips kept {} length {}", st.frames, st.accepted(), st.length());
+        assert!(st.accepted() <= (st.length() / (vh / 2)) as usize + 3, "kept {} strips for {} px", st.accepted(), st.length());
+    }
+}
