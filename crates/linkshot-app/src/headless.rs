@@ -169,6 +169,20 @@ pub fn run_shots(dir: &std::path::Path, files: &[std::path::PathBuf], dark: bool
     app.editor.side_panel = crate::editor::SidePanelMode::Effects;
     let img = render_frame(&ectx, &mut renderer, egui::vec2(1280.0, 820.0), 1.5, bg, |ctx| crate::editor::editor_ui(&mut app, ctx, &mut actions));
     img.save(dir.join("editor_effects.png"))?;
+    // Simplify on a real interface screenshot (the Capture window shot above).
+    if let Ok(cw) = image::open(dir.join("capture_window.png")) {
+        let cw = cw.to_rgba8();
+        if let Ok(png) = linkshot_render::encode_png(&cw) {
+            let (paths, settings) = (app.paths.clone(), app.settings.clone());
+            app.editor.add_document(&ectx, linkshot_core::Document::from_png(cw.width(), cw.height(), png), &paths, &settings);
+            app.editor.side_panel = crate::editor::SidePanelMode::Properties;
+            app.editor.select_tool(linkshot_core::enums::ToolMode::SimplifiedUI);
+            crate::editor::simplify::apply(&mut app);
+            for _ in 0..2 { let _ = render_frame(&ectx, &mut renderer, egui::vec2(1280.0, 820.0), 1.5, bg, |ctx| crate::editor::editor_ui(&mut app, ctx, &mut actions)); }
+            let img = render_frame(&ectx, &mut renderer, egui::vec2(1280.0, 820.0), 1.5, bg, |ctx| crate::editor::editor_ui(&mut app, ctx, &mut actions));
+            img.save(dir.join("editor_simplify.png"))?;
+        }
+    }
     // Right-click menu on the canvas (with a document open).
     {
         use egui::{Event, PointerButton};

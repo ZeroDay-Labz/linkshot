@@ -434,7 +434,19 @@ fn tool_properties(app: &mut App, ui: &mut egui::Ui, tool: ToolMode) {
             changed |= slider_row(ui, "Opacity", &mut q.opacity, 0.0..=100.0, "%");
             ui.label(egui::RichText::new("Drag over the image to erase to the canvas colour (transparent canvases erase to transparency). Annotations are not affected.").small().color(pal.input_secondary));
         }
-        ToolMode::MagicWand | ToolMode::SimplifiedUI => {
+        ToolMode::SimplifiedUI => {
+            ui.label(egui::RichText::new("Turns the screenshot into a clean schematic: panels in flat colours, text as bars, pictures as placeholders. Good for documentation and for hiding details.").small().color(pal.input_secondary));
+            ui.add_space(6.0);
+            ui.label("Colours");
+            for p in super::simplify::Palette::ALL { ui.radio_value(&mut app.editor.simplify.palette, p, p.label()); }
+            ui.add_space(4.0);
+            let mut detail = app.editor.simplify.detail as f64 * 100.0;
+            if slider_row(ui, "Detail", &mut detail, 0.0..=100.0, "%") { app.editor.simplify.detail = (detail / 100.0) as f32; }
+            ui.checkbox(&mut app.editor.simplify.keep_background, "Keep the original background visible");
+            ui.add_space(6.0);
+            if crate::widgets::flat_button(ui, &pal, "Simplify Image", true).clicked() { super::simplify::apply(app); }
+        }
+        ToolMode::MagicWand => {
             ui.label(egui::RichText::new(format!("{} is planned for a later phase.", tool.label())).color(pal.input_secondary));
         }
         _ => {}

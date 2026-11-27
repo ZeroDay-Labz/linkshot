@@ -2,6 +2,7 @@
 
 pub mod canvas;
 pub mod side_panel;
+pub mod simplify;
 pub mod stamps;
 pub mod library_thumbs;
 pub mod tools;
@@ -112,6 +113,7 @@ pub struct EditorState {
     pub export_jobs: Vec<video_view::ExportJob>,
     /// Running uploads (Imgur, Nextcloud).
     pub uploads: Vec<crate::uploads::UploadJob>,
+    pub simplify: simplify::Options,
     pub nextcloud_login: Option<crate::uploads::NextcloudLogin>,
     pub nextcloud_error: Option<String>,
     /// Wakes the UI loop from worker threads (players, exports).
@@ -172,6 +174,7 @@ impl EditorState {
             gif_dialog: None,
             export_jobs: Vec::new(),
             uploads: Vec::new(),
+            simplify: simplify::Options::default(),
             nextcloud_login: None,
             nextcloud_error: None,
             wake: std::sync::Arc::new(|| {}),
@@ -462,7 +465,7 @@ impl EditorState {
 
     pub fn select_tool(&mut self, t: ToolMode) {
         if t == ToolMode::Favorites || t == ToolMode::None { self.tool = t; return; }
-        if matches!(t, ToolMode::MagicWand | ToolMode::SimplifiedUI) {
+        if matches!(t, ToolMode::MagicWand) {
             self.set_status(format!("{} is not available yet", t.label()));
             return;
         }
