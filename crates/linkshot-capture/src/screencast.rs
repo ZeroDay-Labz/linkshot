@@ -99,7 +99,7 @@ impl Session {
                 }).collect();
                 let token = streams.restore_token().map(|t| t.to_string());
                 let fd = sc.open_pipe_wire_remote(&session, OpenPipeWireRemoteOptions::default()).await?;
-                Ok::<_, ashpd::Error>((infos, token, std::os::fd::OwnedFd::from(fd), session, sc))
+                Ok::<_, ashpd::Error>((infos, token, fd, session, sc))
             });
             let (infos, token, fd, _session, _sc) = match setup {
                 Ok(v) => v,
@@ -170,8 +170,8 @@ fn run_loop(fd: std::os::fd::OwnedFd, nodes: Vec<u32>, cmd_rx: pipewire::channel
                     out[y * w * 4..(y + 1) * w * 4].copy_from_slice(row);
                 }
                 match ud.format.format() {
-                    VideoFormat::BGRx | VideoFormat::BGRA => { for px in out.chunks_exact_mut(4) { px.swap(0, 2); px[3] = 255; } }
-                    VideoFormat::RGBx => { for px in out.chunks_exact_mut(4) { px[3] = 255; } }
+                    VideoFormat::BGRx | VideoFormat::BGRA => { for px in out.as_chunks_mut::<4>().0 { px.swap(0, 2); px[3] = 255; } }
+                    VideoFormat::RGBx => { for px in out.as_chunks_mut::<4>().0 { px[3] = 255; } }
                     VideoFormat::RGBA => {}
                     other => { tracing::warn!("screencast: unsupported pixel format {other:?}"); return; }
                 }

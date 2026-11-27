@@ -6,7 +6,7 @@ fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "debug".into())).with_writer(std::io::stderr).init();
     let a: Vec<String> = std::env::args().collect();
     let (x, y): (f64, f64) = (a[1].parse()?, a[2].parse()?);
-    let notches: i32 = a.get(3).and_then(|s| s.parse().ok()).unwrap_or(5);
+    let _notches: i32 = a.get(3).and_then(|s| s.parse().ok()).unwrap_or(5);
     let token = { let home = std::env::var("HOME")?; let t = std::fs::read_to_string(format!("{home}/.config/linkshot/settings.json"))?; t.find("\"remote_desktop_token\"").map(|i| { let r = &t[i + 22..]; let q = r.find('"').unwrap() + 1; let e = r[q..].find('"').unwrap() + q; r[q..e].to_string() }) };
     println!("cursor before: {:?}", linkshot_capture::kwin::cursor_pos()?);
     let mut s = linkshot_capture::scroll_input::Scroller::new(token)?;

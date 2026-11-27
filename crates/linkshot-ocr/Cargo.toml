@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 description = "Text extraction (Grab Text) for linkshot"
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow.workspace = true
 tracing.workspace = true

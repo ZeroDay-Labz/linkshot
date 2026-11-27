@@ -240,7 +240,7 @@ impl SpoolReader {
                 self.buf.extend_from_slice(&self.scratch);
             } else {
                 let (buf, scratch) = (&mut self.buf, &self.scratch);
-                for (d, s) in buf.chunks_exact_mut(8).zip(scratch.chunks_exact(8)) {
+                for (d, s) in buf.as_chunks_mut::<8>().0.iter_mut().zip(scratch.chunks_exact(8)) {
                     let v = u64::from_ne_bytes(d.as_ref().try_into().unwrap()) ^ u64::from_ne_bytes(s.try_into().unwrap());
                     d.copy_from_slice(&v.to_ne_bytes());
                 }
@@ -316,9 +316,9 @@ mod tests {
 
     fn frame(w: u32, h: u32, seed: u32) -> Vec<u8> {
         let mut v = vec![0u8; (w * h * 4) as usize];
-        for (i, px) in v.chunks_exact_mut(4).enumerate() {
+        for (i, px) in v.as_chunks_mut::<4>().0.iter_mut().enumerate() {
             let x = (i as u32 % w) ^ seed;
-            px.copy_from_slice(&[(x & 255) as u8, ((i as u32 / w) & 255) as u8, (seed * 37 & 255) as u8, 255]);
+            px.copy_from_slice(&[(x & 255) as u8, ((i as u32 / w) & 255) as u8, ((seed * 37) & 255) as u8, 255]);
         }
         v
     }

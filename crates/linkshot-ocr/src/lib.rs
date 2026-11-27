@@ -209,7 +209,7 @@ impl Ocr {
                 let src = ImageSource::from_bytes(rgb.as_raw(), rgb.dimensions()).map_err(|e| anyhow::anyhow!("{e}"))?;
                 let input = self.engine.prepare_input(src)?;
                 let words = self.engine.detect_words(&input)?;
-                let mut heights: Vec<f32> = words.iter().map(|r| { use rten_imageproc::BoundingRect; r.bounding_rect().height() as f32 }).filter(|h| *h > 2.0).collect();
+                let mut heights: Vec<f32> = words.iter().map(|r| { use rten_imageproc::BoundingRect; r.bounding_rect().height() }).filter(|h| *h > 2.0).collect();
                 heights.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
                 let median = heights.get(heights.len() / 2).copied().unwrap_or(28.0);
                 (28.0_f32 / median).clamp(1.0, 3.0)

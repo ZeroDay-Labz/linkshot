@@ -662,7 +662,7 @@ mod tests {
         // identical "JavaScript" code-block headers (same pixels each time) every ~330 px
         let mut hy = 140u32;
         while hy + 34 < ph {
-            for yy in hy..hy + 30 { for x in 60..w - 80 { let v = if (x / 9 + (yy - hy) / 5) % 4 == 0 { 90 } else { 48 }; page.put_pixel(x, yy, Rgba([v, v, v + 6, 255])); } }
+            for yy in hy..hy + 30 { for x in 60..w - 80 { let v = if (x / 9 + (yy - hy) / 5).is_multiple_of(4) { 90 } else { 48 }; page.put_pixel(x, yy, Rgba([v, v, v + 6, 255])); } }
             hy += 330;
         }
         let frame_at = |scroll: u32, tooltip: bool, caret: bool| -> RgbaImage {
@@ -710,7 +710,7 @@ mod tests {
         // Two code blocks with a 28 px header each; the header is pinned to the top of the content
         // area (below a 40 px page toolbar) while the block top is scrolled out of view.
         let blocks = [(1200u32, 1600u32), (3300u32, 1100u32)];
-        let header = |img: &mut RgbaImage, y0: u32| { for yy in y0..y0 + 28 { for x in 40..w - 40 { let v = if (x / 11 + (yy - y0) / 4) % 5 == 0 { 110 } else { 55 }; img.put_pixel(x, yy, Rgba([v, v, v + 8, 255])); } } };
+        let header = |img: &mut RgbaImage, y0: u32| { for yy in y0..y0 + 28 { for x in 40..w - 40 { let v = if (x / 11 + (yy - y0) / 4).is_multiple_of(5) { 110 } else { 55 }; img.put_pixel(x, yy, Rgba([v, v, v + 8, 255])); } } };
         for (top, _) in blocks { header(&mut page, top); }
         let toolbar = 40u32;
         let frame_at = |scroll: u32| -> RgbaImage {

@@ -118,7 +118,7 @@ mod platform {
     fn argb_icon(size: u32) -> ksni::Icon {
         let rgba = icon_rgba(size);
         let mut data = Vec::with_capacity(rgba.len());
-        for px in rgba.chunks_exact(4) { data.extend_from_slice(&[px[3], px[0], px[1], px[2]]); }
+        for px in rgba.as_chunks::<4>().0 { data.extend_from_slice(&[px[3], px[0], px[1], px[2]]); }
         ksni::Icon { width: size as i32, height: size as i32, data }
     }
 

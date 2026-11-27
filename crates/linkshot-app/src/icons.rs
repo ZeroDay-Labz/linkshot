@@ -66,7 +66,7 @@ pub fn tool_icon(p: &Painter, rect: Rect, tool: ToolMode, color: Color32) {
         }
         ToolMode::Blur => {
             for (i, y) in [0.2, 0.5, 0.8].iter().enumerate() {
-                for x in [0.2, 0.5, 0.8] { p.rect_filled(Rect::from_center_size(Pos2::new(r.left() + s * x, r.top() + s * y), Vec2::splat(s * 0.22)), 0.0, color.gamma_multiply(if (i + (x * 10.0) as usize) % 2 == 0 { 1.0 } else { 0.5 })); }
+                for x in [0.2, 0.5, 0.8] { p.rect_filled(Rect::from_center_size(Pos2::new(r.left() + s * x, r.top() + s * y), Vec2::splat(s * 0.22)), 0.0, color.gamma_multiply(if (i + (x * 10.0) as usize).is_multiple_of(2) { 1.0 } else { 0.5 })); }
             }
         }
         ToolMode::SimplifiedUI => {
@@ -191,6 +191,12 @@ pub fn chevron_right(p: &Painter, rect: Rect, color: Color32) {
     let s = rect.width() * 0.25;
     p.line_segment([Pos2::new(c.x - s * 0.5, c.y - s), Pos2::new(c.x + s * 0.5, c.y)], stroke(color, 1.6));
     p.line_segment([Pos2::new(c.x + s * 0.5, c.y), Pos2::new(c.x - s * 0.5, c.y + s)], stroke(color, 1.6));
+}
+pub fn chevron_left(p: &Painter, rect: Rect, color: Color32) {
+    let c = rect.center();
+    let s = rect.width() * 0.25;
+    p.line_segment([Pos2::new(c.x + s * 0.5, c.y - s), Pos2::new(c.x - s * 0.5, c.y)], stroke(color, 1.6));
+    p.line_segment([Pos2::new(c.x - s * 0.5, c.y), Pos2::new(c.x + s * 0.5, c.y + s)], stroke(color, 1.6));
 }
 pub fn pin_icon(p: &Painter, rect: Rect, color: Color32) {
     let r = rect.shrink(rect.width() * 0.2);

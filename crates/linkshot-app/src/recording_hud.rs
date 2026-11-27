@@ -387,10 +387,10 @@ impl RecordingUi {
                 Phase::Paused => ("Paused".to_string(), format!("{time} · {} frames{audio_note}", self.frames), pal.input_secondary),
                 Phase::Finishing => ("Finishing…".to_string(), format!("{time} · {} frames", self.frames), pal.green),
             };
-            let blink = self.phase != Phase::Recording || (self.phase_since.elapsed().as_millis() / 600) % 2 == 0;
+            let blink = self.phase != Phase::Recording || (self.phase_since.elapsed().as_millis() / 600).is_multiple_of(2);
             if blink { painter.circle_filled(Pos2::new(panel.left() + 26.0, panel.center().y), 6.0, dot); }
             // The muted-microphone alert replaces the status line while it applies.
-            let muted_alert = self.mic_alert && self.mic && self.mic_muted && matches!(self.phase, Phase::Recording | Phase::Paused) && (self.phase_since.elapsed().as_millis() / 700) % 2 == 0;
+            let muted_alert = self.mic_alert && self.mic && self.mic_muted && matches!(self.phase, Phase::Recording | Phase::Paused) && (self.phase_since.elapsed().as_millis() / 700).is_multiple_of(2);
             let (sub_text, sub_color) = if let Some(e) = &self.error { (e.clone(), pal.capture_red) } else if muted_alert { (format!("Microphone is muted — press M or {} to unmute", self.mute_hotkey), pal.capture_red) } else { (sub, pal.text) };
             if self.phase == Phase::Countdown {
                 let n = 3 - (self.phase_since.elapsed().as_secs_f32().floor() as u32).min(2);
@@ -486,7 +486,7 @@ impl RecordingUi {
             painter.rect_filled(panel, 8.0, pal.dark_panel.gamma_multiply(0.92));
             painter.rect_stroke(panel, 8.0, Stroke::new(1.0_f32, pal.control_outline), egui::StrokeKind::Inside);
             let dot = match self.phase { Phase::Recording | Phase::Finishing => pal.record, Phase::Paused => pal.input_secondary, _ => pal.selection_orange };
-            let blink = self.phase != Phase::Recording || (self.phase_since.elapsed().as_millis() / 600) % 2 == 0;
+            let blink = self.phase != Phase::Recording || (self.phase_since.elapsed().as_millis() / 600).is_multiple_of(2);
             if blink { painter.circle_filled(Pos2::new(panel.left() + 14.0, panel.center().y), 5.0, dot); }
             let text = match self.phase {
                 Phase::Ready => "Ready".to_string(),

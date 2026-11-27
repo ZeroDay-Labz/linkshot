@@ -32,6 +32,7 @@ pub struct VideoDoc {
     pub frames: usize,
     pub in_ms: Option<u32>,
     pub out_ms: Option<u32>,
+    #[allow(dead_code)]
     pub looping: bool,
     pub error: Option<String>,
     scrub_drag: bool,
@@ -398,6 +399,7 @@ pub struct ExportJob {
     pub started: Instant,
     /// Document the result belongs to (by master path, since indices shift).
     pub master: Option<PathBuf>,
+    #[allow(dead_code)]
     pub target: PathBuf,
     /// True when this is the automatic library save of a fresh recording.
     pub autosave: bool,
@@ -405,10 +407,6 @@ pub struct ExportJob {
 
 #[derive(Clone, Debug)]
 pub enum ExportFormat { Gif(GifOptions), Mp4(Mp4Options) }
-
-impl ExportFormat {
-    pub fn extension(&self) -> &'static str { match self { ExportFormat::Gif(_) => "gif", ExportFormat::Mp4(_) => "mp4" } }
-}
 
 /// Starts a background export of `master` to `target`.
 pub fn start_export(master: PathBuf, target: PathBuf, format: ExportFormat, autosave: bool, wake: Arc<dyn Fn() + Send + Sync>) -> ExportJob {
@@ -621,7 +619,7 @@ fn finish_export(app: &mut App, job: ExportJob, res: anyhow::Result<PathBuf>) {
 }
 
 pub fn human_size(bytes: u64) -> String {
-    if bytes >= 1 << 20 { format!("{:.1} MB", bytes as f64 / (1u64 << 20) as f64) } else { format!("{} KB", (bytes + 1023) / 1024) }
+    if bytes >= 1 << 20 { format!("{:.1} MB", bytes as f64 / (1u64 << 20) as f64) } else { format!("{} KB", bytes.div_ceil(1024)) }
 }
 
 /// Progress toast for the running exports (the oldest one, plus how many more are queued).

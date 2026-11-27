@@ -46,7 +46,7 @@ fn decode(reply: HashMap<String, OwnedValue>, mut data: Vec<u8>) -> Result<RgbaI
                 5 => (p[2], p[1], p[0], p[3]),                  // Format_ARGB32
                 6 => { let a = p[3] as u32; if a == 0 { (0, 0, 0, 0) } else { (((p[2] as u32 * 255) / a) as u8, ((p[1] as u32 * 255) / a) as u8, ((p[0] as u32 * 255) / a) as u8, a as u8) } } // premultiplied
                 13 => (p[2], p[1], p[0], 255),                  // Format_RGBX8888? (treated as RGB)
-                16 | 17 | 18 => (p[0], p[1], p[2], p[3]),       // RGBA8888 family
+                16..=18 => (p[0], p[1], p[2], p[3]),       // RGBA8888 family
                 19 => (p[0], p[1], p[2], 255),                  // RGBX8888
                 _ => (p[2], p[1], p[0], 255),
             };

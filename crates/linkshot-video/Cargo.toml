@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 description = "Video recording spool, GIF/MP4 export and playback for linkshot"
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow.workspace = true
 tracing.workspace = true

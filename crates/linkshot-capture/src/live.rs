@@ -27,7 +27,7 @@ pub fn probe() -> Option<Backend> {
             if crate::kwin::is_kde() && crate::kwin::capture_area(0, 0, 2, 2, false).is_ok() { return Some(Backend::Kwin); }
             return Some(if crate::screencast::available() { Backend::ScreenCast } else { Backend::PortalScreenshot });
         }
-        return if x11_has_compositor() { Some(Backend::Xcap) } else { None };
+        if x11_has_compositor() { Some(Backend::Xcap) } else { None }
     }
     #[cfg(windows)]
     { Some(Backend::Xcap) }

@@ -237,7 +237,7 @@ pub fn decode_to_spool(path: &Path, spool: &Path, progress: &mut dyn FnMut(f32) 
         }
         writer.push((i as f64 * 1000.0 / fps as f64).round() as u32, &buf)?;
         i += 1;
-        if i % 8 == 0 && !progress((i as f32 / expected).min(0.98)) { let _ = child.kill(); writer.abort(); bail!("cancelled"); }
+        if i.is_multiple_of(8) && !progress((i as f32 / expected).min(0.98)) { let _ = child.kill(); writer.abort(); bail!("cancelled"); }
     }
     let status = child.wait()?;
     let err_text = err_thread.join().unwrap_or_default();

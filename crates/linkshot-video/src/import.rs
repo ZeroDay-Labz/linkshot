@@ -37,7 +37,7 @@ pub fn gif_to_spool(path: &Path, spool: &Path, progress: &mut dyn FnMut(f32) -> 
         w.push(t_ms, buf.as_raw())?;
         t_ms += delay;
         n += 1;
-        if n % 10 == 0 && !progress(0.5) { w.abort_ref(); bail!("cancelled"); }
+        if n.is_multiple_of(10) && !progress(0.5) { w.abort_ref(); bail!("cancelled"); }
     }
     let Some(w) = writer else { bail!("GIF has no frames") };
     let info = w.finish()?;

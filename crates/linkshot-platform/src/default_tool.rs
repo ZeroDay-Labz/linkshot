@@ -48,7 +48,7 @@ pub struct Identity {
 impl Identity {
     pub fn detect() -> Self {
         if let Ok(id) = std::env::var("FLATPAK_ID") {
-            return Self { desktop_id: id.clone(), capture_command: vec!["flatpak".into(), "run".into(), format!("--command=linkshot"), id, "--capture".into()] };
+            return Self { desktop_id: id.clone(), capture_command: vec!["flatpak".into(), "run".into(), "--command=linkshot".to_string(), id, "--capture".into()] };
         }
         let exe = std::env::current_exe().map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|_| "linkshot".into());
         Self { desktop_id: crate::APP_ID.into(), capture_command: vec![exe, "--capture".into()] }

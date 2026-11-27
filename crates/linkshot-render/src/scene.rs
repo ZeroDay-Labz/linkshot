@@ -118,7 +118,7 @@ impl Renderer {
         let mut pm = Pixmap::new(w, h)?;
         self.draw_background(&mut pm, doc, page, opts);
         for obj in &page.capture_objects {
-            if opts.skip_ids.iter().any(|id| *id == obj.object_id) { continue; }
+            if opts.skip_ids.contains(&obj.object_id) { continue; }
             self.draw_object_at(&mut pm, doc, page, obj, s, off);
         }
         if opts.clip.is_none() {
@@ -406,7 +406,7 @@ fn blend_rows(dst: &mut Pixmap, src: &Pixmap, area: tiny_skia::IntRect, x: i32, 
         let srow = ((yy - y + area.y()) * sw + (x0 - x + area.x())) as usize * 4;
         let drow = (yy * dw + x0) as usize * 4;
         let n = (x1 - x0) as usize * 4;
-        for (sp, dp) in s[srow..srow + n].chunks_exact(4).zip(d[drow..drow + n].chunks_exact_mut(4)) {
+        for (sp, dp) in s[srow..srow + n].as_chunks::<4>().0.iter().zip(d[drow..drow + n].chunks_exact_mut(4)) {
             if sp[3] == 0 { continue; }
             let sa = sp[3] as f32 * F * opacity;
             let inv = 1.0 - sa;
@@ -498,7 +498,7 @@ fn draw_checkerboard(pm: &mut Pixmap, cell: u32) {
     let data = pm.data_mut();
     for y in 0..h {
         for x in 0..w {
-            let c = if ((x / cell) + (y / cell)) % 2 == 0 { light } else { dark };
+            let c = if ((x / cell) + (y / cell)).is_multiple_of(2) { light } else { dark };
             let o = ((y * w + x) * 4) as usize;
             data[o..o + 4].copy_from_slice(&c);
         }
@@ -514,7 +514,7 @@ fn apply_corner_mask(pm: &mut Pixmap, ratio: f32) {
     let mut mask = tiny_skia::Mask::new(pm.width(), pm.height()).unwrap();
     mask.fill_path(&path, FillRule::Winding, true, Transform::identity());
     let mask_data = mask.data();
-    for (i, px) in pm.data_mut().chunks_exact_mut(4).enumerate() {
+    for (i, px) in pm.data_mut().as_chunks_mut::<4>().0.iter_mut().enumerate() {
         let m = mask_data[i] as u32;
         if m == 255 { continue; }
         for c in px.iter_mut() { *c = ((*c as u32 * m + 127) / 255) as u8; }

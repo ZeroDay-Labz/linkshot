@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 description = "tiny-skia rasteriser for linkshot documents"
 
+[lints]
+workspace = true
+
 [dependencies]
 linkshot-core.workspace = true
 anyhow.workspace = true

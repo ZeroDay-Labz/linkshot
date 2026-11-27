@@ -10,7 +10,7 @@ env:
 
 jobs:
   linux:
-    name: Linux (build + tests)
+    name: Linux (build, lint, tests)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,16 +20,20 @@ jobs:
           sudo apt-get install -y --no-install-recommends libgtk-3-dev libxcb1-dev libxcb-shape0-dev libxcb-xfixes0-dev \
             libxkbcommon-dev libwayland-dev libpipewire-0.3-dev libdbus-1-dev libfontconfig1-dev libgbm-dev clang
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
       - uses: Swatinem/rust-cache@v2
       - name: Build
         run: cargo build --release -p linkshot --locked
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Tests
         run: cargo test --workspace --locked
       - name: Self-test (headless capture -> editor -> save -> record -> GIF)
         run: ./target/release/linkshot --selftest
 
   windows:
-    name: Windows (build)
+    name: Windows (build + core tests)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -37,3 +41,5 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Build
         run: cargo build --release -p linkshot --locked
+      - name: Tests (platform-independent crates)
+        run: cargo test -p linkshot-core -p linkshot-render --locked

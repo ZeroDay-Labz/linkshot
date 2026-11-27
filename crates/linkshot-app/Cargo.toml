@@ -9,6 +9,9 @@ categories = ["multimedia", "multimedia::images", "multimedia::video", "gui"]
 
 build = "build.rs"
 
+[lints]
+workspace = true
+
 [[bin]]
 name = "linkshot"
 path = "src/main.rs"

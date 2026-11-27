@@ -68,7 +68,7 @@ impl SoftwareRenderer {
         for cp in prims {
             let Primitive::Mesh(mesh) = &cp.primitive else { continue };
             let clip = Rect::from_min_max(cp.clip_rect.min * ppp, cp.clip_rect.max * ppp);
-            for tri in mesh.indices.chunks_exact(3) {
+            for tri in mesh.indices.as_chunks::<3>().0 {
                 let v0 = &mesh.vertices[tri[0] as usize];
                 let v1 = &mesh.vertices[tri[1] as usize];
                 let v2 = &mesh.vertices[tri[2] as usize];
@@ -360,7 +360,7 @@ pub fn run_shots(dir: &std::path::Path, files: &[std::path::PathBuf], dark: bool
         let set = crate::editor::stamps::builtin();
         let cell = 140u32;
         let cols = 7u32;
-        let rows = (set.len() as u32 + cols - 1) / cols;
+        let rows = (set.len() as u32).div_ceil(cols);
         let mut sheet = RgbaImage::from_pixel(cols * cell, rows * cell, image::Rgba([240, 240, 240, 255]));
         for (i, st) in set.iter().enumerate() {
             let img = image::load_from_memory(&st.png)?.to_rgba8();
@@ -420,7 +420,7 @@ pub fn run_selftest() -> anyhow::Result<()> {
         let mut live = crate::overlay::Overlay::new(layout, 0, app.presets.all_in_one.clone(), false);
         anyhow::ensure!(live.live(), "layout-only snapshot should be live");
         let lctx = egui::Context::default();
-        let mut lfeed = |events: Vec<Event>, o: &mut crate::overlay::Overlay| {
+        let lfeed = |events: Vec<Event>, o: &mut crate::overlay::Overlay| {
             let raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)), max_texture_side: Some(16384), events, ..Default::default() };
             let _ = lctx.run(raw, |ctx| o.ui(ctx, &pal, 0));
         };
@@ -572,9 +572,9 @@ pub fn run_selftest() -> anyhow::Result<()> {
         let mut wr = linkshot_video::SpoolWriter::create(&spool, w, h, 30)?;
         for k in 0..45u32 {
             let mut f = vec![0u8; (w * h * 4) as usize];
-            for (i, px) in f.chunks_exact_mut(4).enumerate() {
+            for (i, px) in f.as_chunks_mut::<4>().0.iter_mut().enumerate() {
                 let (x, y) = (i as u32 % w, i as u32 / w);
-                let inside = x >= k * 2 && x < k * 2 + 30 && y >= 30 && y < 70;
+                let inside = x >= k * 2 && x < k * 2 + 30 && (30..70).contains(&y);
                 px.copy_from_slice(if inside { &[230, 90, 40, 255] } else if (x / 20 + y / 20) % 2 == 0 { &[40, 44, 52, 255] } else { &[48, 52, 60, 255] });
             }
             wr.push(k * 33, &f)?;

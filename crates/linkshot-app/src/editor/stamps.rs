@@ -16,6 +16,7 @@ pub struct Stamp {
     pub png: Arc<Vec<u8>>,
     pub width: u32,
     pub height: u32,
+    #[allow(dead_code)]
     pub path: Option<PathBuf>,
 }
 

@@ -30,8 +30,8 @@ impl Palette {
         let mut sub: Vec<u8> = Vec::with_capacity((total / stride + 1) * 4);
         let mut k = 0usize;
         for s in samples {
-            for px in s.chunks_exact(4) {
-                if k % stride == 0 {
+            for px in s.as_chunks::<4>().0 {
+                if k.is_multiple_of(stride) {
                     sub.extend_from_slice(&[px[0], px[1], px[2], 255]);
                     if colours.len() <= 255 { colours.insert(key(px[0], px[1], px[2])); }
                 }
@@ -42,7 +42,7 @@ impl Palette {
             // Exact palette: check all pixels (not just the subsample) still fit.
             let mut all = colours.clone();
             'outer: for s in samples {
-                for px in s.chunks_exact(4) {
+                for px in s.as_chunks::<4>().0 {
                     all.insert(key(px[0], px[1], px[2]));
                     if all.len() > 255 { break 'outer; }
                 }
@@ -57,7 +57,7 @@ impl Palette {
         if sub.len() < 4 * 16 { sub.resize(4 * 16, 0); }
         let nq = color_quant::NeuQuant::new(10, 255, &sub);
         let map = nq.color_map_rgb();
-        let rgb: Vec<[u8; 3]> = map.chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect();
+        let rgb: Vec<[u8; 3]> = map.as_chunks::<3>().0.iter().map(|c| [c[0], c[1], c[2]]).collect();
         Palette { rgb, exact: false, nq: Some(nq), cache: HashMap::new(), lut: vec![] }
     }
 
@@ -112,7 +112,7 @@ pub fn quantize(pal: &mut Palette, rgba: &[u8], width: u32, height: u32, dither:
     out.clear();
     out.resize(w * h, 0);
     if !dither || pal.exact {
-        for (px, o) in rgba.chunks_exact(4).zip(out.iter_mut()) { *o = pal.index(px[0], px[1], px[2]); }
+        for (px, o) in rgba.as_chunks::<4>().0.iter().zip(out.iter_mut()) { *o = pal.index(px[0], px[1], px[2]); }
         return;
     }
     let mut err_cur = vec![[0i32; 3]; w + 2];

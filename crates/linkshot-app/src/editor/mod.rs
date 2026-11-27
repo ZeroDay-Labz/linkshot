@@ -32,7 +32,6 @@ pub struct OpenDoc {
     pub thumb_version: u64,
     pub pinned: bool,
     pub kind: TrayItemType,
-    pub opened: Instant,
     /// Last edit/undo/redo; the tray thumbnail is refreshed once edits pause.
     pub changed_at: Instant,
     /// Set for GIF/MP4 documents: the player and export source (`doc` holds the poster frame).
@@ -43,7 +42,7 @@ pub struct OpenDoc {
 
 impl OpenDoc {
     pub fn new(doc: Document) -> Self {
-        Self { doc, version: 1, saved_version: 0, undo: UndoStack::default(), thumb: None, thumb_version: 0, pinned: false, kind: TrayItemType::Image, opened: Instant::now(), changed_at: Instant::now(), video: None, last_edit: None }
+        Self { doc, version: 1, saved_version: 0, undo: UndoStack::default(), thumb: None, thumb_version: 0, pinned: false, kind: TrayItemType::Image, changed_at: Instant::now(), video: None, last_edit: None }
     }
     pub fn is_dirty(&self) -> bool { self.version != self.saved_version }
     pub fn is_video(&self) -> bool { self.video.is_some() }
@@ -92,8 +91,6 @@ pub struct EditorState {
     pub pending_share: Option<CaptureSettings>,
     pub status: Option<(String, Instant)>,
     pub show_customize_toolbar: bool,
-    pub tag_popup: bool,
-    pub zoom_popup: bool,
     pub size_popup: bool,
     pub resize_w: String,
     pub resize_h: String,
@@ -103,7 +100,6 @@ pub struct EditorState {
     pub library_thumbs: Option<library_thumbs::LibraryThumbs>,
     pub library_scan: Option<library_thumbs::ScanJob>,
     pub library_filter: String,
-    pub selected_library: Vec<PathBuf>,
     pub new_image_dialog: bool,
     /// "Edit Value…" on a Step: (object id, text being edited).
     pub step_edit: Option<(String, String)>,
@@ -154,8 +150,6 @@ impl EditorState {
             pending_share: None,
             status: None,
             show_customize_toolbar: false,
-            tag_popup: false,
-            zoom_popup: false,
             size_popup: false,
             resize_w: String::new(),
             resize_h: String::new(),
@@ -165,7 +159,6 @@ impl EditorState {
             library_thumbs: None,
             library_scan: None,
             library_filter: String::new(),
-            selected_library: vec![],
             new_image_dialog: false,
             step_edit: None,
             new_w: settings.new_image_width.to_string(),
@@ -1153,7 +1146,7 @@ fn library_view(app: &mut App, ui: &mut egui::Ui, rect: Rect, ctx: &egui::Contex
     ui.scope_builder(egui::UiBuilder::new().max_rect(grid.shrink(10.0)), |ui| {
         let filter = app.editor.library_filter.to_lowercase();
         let mut entries: Vec<_> = app.editor.library.entries.values().filter(|e| filter.is_empty() || e.path.to_string_lossy().to_lowercase().contains(&filter) || e.tags.iter().any(|t| t.to_lowercase().contains(&filter))).cloned().collect();
-        entries.sort_by(|a, b| b.modified.cmp(&a.modified));
+        entries.sort_by_key(|e| std::cmp::Reverse(e.modified));
         if entries.is_empty() {
             ui.add_space(40.0);
             ui.vertical_centered(|ui| { ui.label(egui::RichText::new(if app.editor.library_scan.is_some() { "Scanning the library…" } else { "No captures in the library yet." }).color(pal.input_secondary)); });

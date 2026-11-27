@@ -73,6 +73,8 @@ pub struct App {
     pub paths: Paths,
     pub settings: Settings,
     pub presets: SavedPresets,
+    /// Built-in and user themes (kept for the theme picker; the Editor reads its own copy).
+    #[allow(dead_code)]
     pub themes: Vec<Theme>,
     pub pal: Palette,
     pub capture: CaptureWindowState,

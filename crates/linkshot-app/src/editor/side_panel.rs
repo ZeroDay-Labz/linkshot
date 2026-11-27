@@ -162,7 +162,7 @@ fn style_preview(p: &egui::Painter, r: Rect, q: &QuickStyle, text: Color32) {
             match q.tool_shape { ShapeShape::Ellipse => { if bg.a() > 0 { p.circle_filled(c, r.width() / 2.0, bg); } p.circle_stroke(c, r.width() / 2.0 - w / 2.0, Stroke::new(w, fg)); } ShapeShape::RoundedRectangle => { if bg.a() > 0 { p.rect_filled(r, 5.0, bg); } p.rect_stroke(r, 5.0, Stroke::new(w, fg), egui::StrokeKind::Inside); } _ => { if bg.a() > 0 { p.rect_filled(r, 0.0, bg); } p.rect_stroke(r, 0.0, Stroke::new(w, fg), egui::StrokeKind::Inside); } }
         }
         ToolMode::Highlight => { p.rect_filled(Rect::from_center_size(c, Vec2::new(r.width(), r.height() * 0.45)), 0.0, fg.gamma_multiply(0.6)); }
-        ToolMode::Pen => { let pts: Vec<Pos2> = (0..12).map(|i| { let t = i as f32 / 11.0; Pos2::new(r.left() + t * r.width(), c.y + (t * 6.28).sin() * r.height() * 0.3) }).collect(); let _ = p.add(egui::Shape::line(pts, Stroke::new((q.stroke_width as f32 * 0.4).clamp(1.5, 6.0), fg))); }
+        ToolMode::Pen => { let pts: Vec<Pos2> = (0..12).map(|i| { let t = i as f32 / 11.0; Pos2::new(r.left() + t * r.width(), c.y + (t * std::f32::consts::TAU).sin() * r.height() * 0.3) }).collect(); let _ = p.add(egui::Shape::line(pts, Stroke::new((q.stroke_width as f32 * 0.4).clamp(1.5, 6.0), fg))); }
         ToolMode::Fill => { p.rect_filled(r, 3.0, bg); }
         ToolMode::Step => { p.circle_filled(c, r.width() / 2.0, bg); p.text(c, Align2::CENTER_CENTER, "1", FontId::proportional(14.0), fg); }
         ToolMode::Text => { p.text(c, Align2::CENTER_CENTER, "A", FontId::proportional((q.font_size as f32 * 0.9).clamp(12.0, 26.0)), argb_to_color32(q.text_selection_color)); }

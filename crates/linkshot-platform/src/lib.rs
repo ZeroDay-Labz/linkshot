@@ -158,7 +158,7 @@ pub mod autostart {
 
     pub fn is_enabled() -> bool {
         #[cfg(target_os = "linux")]
-        { return desktop_file().map(|p| p.exists()).unwrap_or(false) || legacy_desktop_file().map(|p| p.exists()).unwrap_or(false); }
+        { desktop_file().map(|p| p.exists()).unwrap_or(false) || legacy_desktop_file().map(|p| p.exists()).unwrap_or(false)}
         #[cfg(windows)]
         { return windows_run_key(&["query", RUN_KEY, "/v", "LinkShot"]).is_ok(); }
         #[cfg(not(any(target_os = "linux", windows)))]

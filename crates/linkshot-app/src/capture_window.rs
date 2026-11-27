@@ -13,7 +13,6 @@ pub struct CaptureWindowState {
     pub presets_expanded: bool,
     pub editing_hotkey_for: Option<String>,
     pub renaming: Option<String>,
-    pub time_delay_popup: bool,
     pub all_in_one_expanded: bool,
     /// Audio inputs / cameras for the Video tab popups (refreshed when a popup opens).
     pub audio_devices: Vec<linkshot_audio::Device>,
@@ -616,7 +615,7 @@ impl App {
                 ui.add_space(13.0);
             }
             let (r, resp) = ui.allocate_exact_size(Vec2::new(14.0, 100.0), Sense::click());
-            if self.capture.all_in_one_expanded { icons::chevron_right(ui.painter(), Rect::from_center_size(Pos2::new(r.center().x, r.top() + 40.0), Vec2::splat(14.0)), pal.text); } else { icons::chevron_right(ui.painter(), Rect::from_center_size(Pos2::new(r.center().x, r.top() + 40.0), Vec2::splat(14.0)), pal.text); }
+            if self.capture.all_in_one_expanded { icons::chevron_left(ui.painter(), Rect::from_center_size(Pos2::new(r.center().x, r.top() + 40.0), Vec2::splat(14.0)), pal.text); } else { icons::chevron_right(ui.painter(), Rect::from_center_size(Pos2::new(r.center().x, r.top() + 40.0), Vec2::splat(14.0)), pal.text); }
             if resp.on_hover_text("Show/hide additional options").clicked() { self.capture.all_in_one_expanded = !self.capture.all_in_one_expanded; }
             ui.add_space(6.0);
             self.option_toggles(ui, false);

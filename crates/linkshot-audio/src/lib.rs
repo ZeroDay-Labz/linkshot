@@ -203,7 +203,7 @@ fn capture_loop(src: &mut dyn Source, path: &Path, origin: Instant, muted: &Atom
 /// Peak absolute sample value of an `s16le` chunk, 0..=1.
 pub fn peak(chunk: &[u8]) -> f32 {
     let mut max = 0i32;
-    for s in chunk.chunks_exact(2) {
+    for s in chunk.as_chunks::<2>().0 {
         let v = i16::from_le_bytes([s[0], s[1]]) as i32;
         max = max.max(v.abs());
     }

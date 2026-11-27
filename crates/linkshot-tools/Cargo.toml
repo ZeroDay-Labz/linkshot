@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 description = "Locates the helper programs LinkShot ships with (ffmpeg, tesseract, OCR models)"
 
+[lints]
+workspace = true
+
 [features]
 # Carry the tool bundle (a .tar.zst named by LINKSHOT_BUNDLE at build time) inside the executable
 # and unpack it on first use. Used for the single-file Windows build.

@@ -233,7 +233,7 @@ mod tests {
         let mut src = MemorySource::new(w, h);
         for k in 0..3u32 {
             let mut f = vec![0u8; (w * h * 4) as usize];
-            for (i, px) in f.chunks_exact_mut(4).enumerate() { let x = i as u32 % w; let y = i as u32 / w; px.copy_from_slice(&[(x * 4) as u8, (y * 4) as u8, (k * 80) as u8, 255]); }
+            for (i, px) in f.as_chunks_mut::<4>().0.iter_mut().enumerate() { let x = i as u32 % w; let y = i as u32 / w; px.copy_from_slice(&[(x * 4) as u8, (y * 4) as u8, (k * 80) as u8, 255]); }
             src.push(f, 100);
         }
         let dir = std::env::temp_dir().join(format!("linkshot-gif-test2-{}", std::process::id()));

@@ -63,7 +63,7 @@ fn box_blur_h1(src: &[u8], dst: &mut [u8], w: usize, h: usize, r: usize) {
         for x in 0..w {
             out[x] = quot(acc) as u8;
             let add = (x + r + 1).min(w - 1);
-            let sub = if x < r { 0 } else { x - r };
+            let sub = x.saturating_sub(r);
             acc += row[add] as u32;
             acc -= row[sub] as u32;
         }
@@ -102,7 +102,7 @@ pub fn shadow(src: &Pixmap, color: tiny_skia::Color, opacity: f32, sigma: f32) -
     let (r, g, b) = (color.red(), color.green(), color.blue());
     let fill: [[u8; 4]; 256] = std::array::from_fn(|v| { let af = v as f32; [(r * af).round() as u8, (g * af).round() as u8, (b * af).round() as u8, v as u8] });
     let mut data = vec![0u8; a.len() * 4];
-    for (px, &al) in data.chunks_exact_mut(4).zip(&a) { px.copy_from_slice(&fill[al as usize]); }
+    for (px, &al) in data.as_chunks_mut::<4>().0.iter_mut().zip(&a) { px.copy_from_slice(&fill[al as usize]); }
     Pixmap::from_vec(data, tiny_skia::IntSize::from_wh(w as u32, h as u32)?)
 }
 
@@ -163,7 +163,7 @@ pub fn pixelate(pm: &mut Pixmap, cell: u32) {
 /// Replaces every pixel's colour with `color` keeping the alpha (for drop shadows).
 pub fn tint_alpha(pm: &mut Pixmap, color: tiny_skia::Color, opacity: f32) {
     let (r, g, b) = (color.red(), color.green(), color.blue());
-    for px in pm.data_mut().chunks_exact_mut(4) {
+    for px in pm.data_mut().as_chunks_mut::<4>().0 {
         let a = (px[3] as f32 * opacity).round().clamp(0.0, 255.0);
         px[0] = (r * a).round() as u8;
         px[1] = (g * a).round() as u8;

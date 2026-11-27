@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 description = "Microphone / system-audio capture, mixing and playback for linkshot recordings"
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow.workspace = true
 tracing.workspace = true

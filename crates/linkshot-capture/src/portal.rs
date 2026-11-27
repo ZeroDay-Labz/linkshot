@@ -11,7 +11,7 @@ pub fn screenshot() -> Result<RgbaImage> {
         Ok::<String, ashpd::Error>(resp.uri().to_string())
     })
     .context("portal screenshot")?;
-    let path = uri.strip_prefix("file://").map(|p| percent_decode(p)).with_context(|| format!("unexpected screenshot uri {uri}"))?;
+    let path = uri.strip_prefix("file://").map(percent_decode).with_context(|| format!("unexpected screenshot uri {uri}"))?;
     let img = image::open(&path).with_context(|| format!("open {path}"))?.to_rgba8();
     let _ = std::fs::remove_file(&path);
     Ok(img)

@@ -18,6 +18,28 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/ZeroDay-Labz/linkshot"
 
+# Style lints the code base deliberately does not follow; everything else in clippy's default set
+# is enforced in CI (`cargo clippy -- -D warnings`).
+[workspace.lints.rust]
+# Newer clippy lints named below are unknown to older toolchains.
+unknown_lints = "allow"
+
+[workspace.lints.clippy]
+collapsible_if = "allow"
+collapsible_else_if = "allow"
+collapsible_match = "allow"
+type_complexity = "allow"
+too_many_arguments = "allow"
+needless_range_loop = "allow"
+large_enum_variant = "allow"
+field_reassign_with_default = "allow"
+# Several statements per line are common here; `if a {..} if b {..}` is intended.
+possible_missing_else = "allow"
+# `.max(lo).min(hi)` never panics, unlike `clamp` with inverted bounds.
+manual_clamp = "allow"
+manual_checked_ops = "allow"
+chunks_exact_to_as_chunks = "allow"
+
 [workspace.dependencies]
 linkshot-core = { path = "crates/linkshot-core" }
 linkshot-render = { path = "crates/linkshot-render" }

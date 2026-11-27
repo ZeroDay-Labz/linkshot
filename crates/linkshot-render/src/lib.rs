@@ -15,7 +15,7 @@ use image::RgbaImage;
 pub fn pixmap_from_rgba(width: u32, height: u32, rgba: &[u8]) -> Option<Pixmap> {
     let mut pm = Pixmap::new(width, height)?;
     let data = pm.data_mut();
-    for (dst, src) in data.chunks_exact_mut(4).zip(rgba.chunks_exact(4)) {
+    for (dst, src) in data.as_chunks_mut::<4>().0.iter_mut().zip(rgba.chunks_exact(4)) {
         let a = src[3] as u32;
         dst[0] = ((src[0] as u32 * a + 127) / 255) as u8;
         dst[1] = ((src[1] as u32 * a + 127) / 255) as u8;
@@ -32,7 +32,7 @@ pub fn pixmap_from_image(img: &RgbaImage) -> Option<Pixmap> {
 /// Converts a premultiplied pixmap back to straight-alpha RGBA.
 pub fn pixmap_to_image(pm: &Pixmap) -> RgbaImage {
     let mut out = RgbaImage::new(pm.width(), pm.height());
-    for (dst, src) in out.as_mut().chunks_exact_mut(4).zip(pm.data().chunks_exact(4)) {
+    for (dst, src) in out.as_mut().as_chunks_mut::<4>().0.iter_mut().zip(pm.data().chunks_exact(4)) {
         let a = src[3] as u32;
         if a == 0 {
             dst.copy_from_slice(&[0, 0, 0, 0]);
@@ -66,7 +66,7 @@ pub fn decimate(img: &RgbaImage, factor: u32) -> RgbaImage {
     let src = img.as_raw();
     let sw = img.width() as usize;
     let mut out = vec![0u8; (w * h * 4) as usize];
-    let n = (f * f) as u32;
+    let n = f * f;
     for oy in 0..h as usize {
         let row = &mut out[oy * w as usize * 4..(oy + 1) * w as usize * 4];
         for ox in 0..w as usize {

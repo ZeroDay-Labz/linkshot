@@ -237,13 +237,13 @@ pub fn capture_monitor(id: u32) -> Result<RgbaImage> {
         return Ok(snap.images[idx].clone());
     }
     let m = xcap::Monitor::all()?.into_iter().find(|m| m.id().ok() == Some(id)).context("monitor not found")?;
-    Ok(m.capture_image().context("capture monitor")?)
+    m.capture_image().context("capture monitor")
 }
 
 pub fn capture_window(id: u32) -> Result<RgbaImage> {
     anyhow::ensure!(!is_wayland(), "window capture is not available on Wayland");
     let w = xcap::Window::all()?.into_iter().find(|w| w.id().ok() == Some(id)).context("window not found")?;
-    Ok(w.capture_image().context("capture window")?)
+    w.capture_image().context("capture window")
 }
 
 /// Pointer position in logical virtual-desktop coordinates, when the platform can tell.
@@ -252,7 +252,7 @@ pub fn pointer_position() -> Option<(f64, f64)> {
     {
         if is_wayland() { return if kwin::is_kde() { kwin::cursor_pos().ok() } else { None }; }
         let c = cursor::grab()?;
-        return Some((c.x as f64 + c.image.width() as f64 / 2.0, c.y as f64 + c.image.height() as f64 / 2.0));
+        Some((c.x as f64 + c.image.width() as f64 / 2.0, c.y as f64 + c.image.height() as f64 / 2.0))
     }
     #[cfg(windows)]
     { let c = cursor::grab()?; Some((c.x as f64, c.y as f64)) }

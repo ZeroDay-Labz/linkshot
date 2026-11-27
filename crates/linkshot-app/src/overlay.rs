@@ -537,8 +537,8 @@ fn resize_rect(start: LRect, i: usize, p: Pt) -> LRect {
     let (mut l, mut t, mut r, mut b) = (start.min.x, start.min.y, start.max.x, start.max.y);
     if matches!(i, 0 | 3 | 5) { l = p.x.round(); }
     if matches!(i, 2 | 4 | 7) { r = p.x.round(); }
-    if matches!(i, 0 | 1 | 2) { t = p.y.round(); }
-    if matches!(i, 5 | 6 | 7) { b = p.y.round(); }
+    if matches!(i, 0..=2) { t = p.y.round(); }
+    if matches!(i, 5..=7) { b = p.y.round(); }
     let (l, r) = if l <= r { (l, r) } else { (r, l) };
     let (t, b) = if t <= b { (t, b) } else { (b, t) };
     LRect::from_points(Pt::new(l, t), Pt::new(r.max(l + 1.0), b.max(t + 1.0)))

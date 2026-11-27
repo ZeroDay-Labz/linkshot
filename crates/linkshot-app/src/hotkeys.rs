@@ -27,6 +27,7 @@ pub struct Hotkeys {
     registered: Vec<(global_hotkey::hotkey::HotKey, HotkeyEvent)>,
     #[cfg(feature = "hotkeys")]
     id_map: Option<std::sync::Arc<parking_lot::Mutex<Vec<(u32, HotkeyEvent)>>>>,
+    #[allow(dead_code)]
     pub available: bool,
     pub error: Option<String>,
     #[cfg(target_os = "linux")]
@@ -66,9 +67,9 @@ impl Hotkeys {
                         if ev.state() != global_hotkey::HotKeyState::Pressed { return; }
                         if let Some((_, e)) = reg2.lock().iter().find(|(id, _)| *id == ev.id()) { let _ = tx2.send(e.clone()); wake2(); }
                     }));
-                    return Self { rx, tx, wake, manager: Some(m), registered: vec![], id_map: Some(registered), available: true, error: None, #[cfg(target_os = "linux")] portal: None };
+                    Self { rx, tx, wake, manager: Some(m), registered: vec![], id_map: Some(registered), available: true, error: None, #[cfg(target_os = "linux")] portal: None }
                 }
-                Err(e) => return Self { rx, tx, wake, manager: None, registered: vec![], id_map: None, available: false, error: Some(e.to_string()), #[cfg(target_os = "linux")] portal: None },
+                Err(e) => Self { rx, tx, wake, manager: None, registered: vec![], id_map: None, available: false, error: Some(e.to_string()), #[cfg(target_os = "linux")] portal: None },
             }
         }
         #[cfg(not(feature = "hotkeys"))]
@@ -264,13 +265,9 @@ mod portal {
                     *error.lock() = None;
                     let mut activated = gs.receive_activated().await?;
                     let mut stopped = std::pin::pin!(stop.wait());
-                    loop {
-                        match futures_util::future::select(activated.next(), stopped.as_mut()).await {
-                            futures_util::future::Either::Left((Some(ev), _)) => {
-                                if let Some((_, _, _, e)) = bindings.iter().find(|(id, _, _, _)| id == ev.shortcut_id()) { let _ = tx.send(e.clone()); wake(); }
-                            }
-                            futures_util::future::Either::Left((None, _)) | futures_util::future::Either::Right(_) => break,
-                        }
+                    // Until the stream ends or a newer `apply` stops this session.
+                    while let futures_util::future::Either::Left((Some(ev), _)) = futures_util::future::select(activated.next(), stopped.as_mut()).await {
+                        if let Some((_, _, _, e)) = bindings.iter().find(|(id, _, _, _)| id == ev.shortcut_id()) { let _ = tx.send(e.clone()); wake(); }
                     }
                     let _ = session.close().await;
                     Ok::<(), ashpd::Error>(())

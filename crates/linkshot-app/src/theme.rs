@@ -5,6 +5,8 @@ use linkshot_core::settings::UiTheme;
 use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug)]
+// A full set of design tokens; not every one is used by every build.
+#[allow(dead_code)]
 pub struct Palette {
     pub main_panel: Color32,
     pub dark_panel: Color32,

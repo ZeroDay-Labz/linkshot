@@ -264,8 +264,6 @@ fn commit(app: &mut App, name: &str, before: Document) {
         }
     }
 }
-// `changed_at` holds back the tray thumbnail (a full re-render) until a drag or stroke pauses.
-fn bump(app: &mut App) { if let Some(d) = app.editor.current_doc_mut() { d.version += 1; d.changed_at = std::time::Instant::now(); } }
 
 pub fn handle_input(app: &mut App, ui: &mut egui::Ui, resp: &Response, canvas: Rect, ctx: &egui::Context) {
     let Some(_) = app.editor.current else { return };
@@ -652,7 +650,7 @@ pub fn erase_apply(app: &mut App, points: &[Pt]) {
     if points.is_empty() { return; }
     let Some(i) = app.editor.current else { return };
     let q = app.editor.current_props();
-    let radius = (q.stroke_width.max(1.0) / 2.0) as f64;
+    let radius = q.stroke_width.max(1.0) / 2.0;
     let opacity = (q.opacity / 100.0).clamp(0.0, 1.0);
     let doc = app.editor.docs[i].doc.clone();
     let page = doc.page();
@@ -879,7 +877,7 @@ pub fn reorder(app: &mut App, dir: i32) {
             let objs = &mut doc.page_mut().capture_objects;
             let selected: Vec<CaptureObject> = objs.iter().filter(|o| sel.contains(&o.object_id)).cloned().collect();
             if dir == i32::MAX { objs.retain(|o| !sel.contains(&o.object_id)); objs.extend(selected); }
-            else if dir == i32::MIN { objs.retain(|o| !sel.contains(&o.object_id)); let mut v = selected; v.extend(objs.drain(..)); *objs = v; }
+            else if dir == i32::MIN { objs.retain(|o| !sel.contains(&o.object_id)); let mut v = selected; v.append(objs); *objs = v; }
             else if dir > 0 { for i in (0..objs.len().saturating_sub(1)).rev() { if sel.contains(&objs[i].object_id) && !sel.contains(&objs[i + 1].object_id) { objs.swap(i, i + 1); } } }
             else { for i in 1..objs.len() { if sel.contains(&objs[i].object_id) && !sel.contains(&objs[i - 1].object_id) { objs.swap(i, i - 1); } } }
         });
@@ -1013,7 +1011,7 @@ pub fn region_copy(app: &mut App) {
 pub fn fill_at(app: &mut App, p: Pt) {
     let q = app.editor.current_props();
     let color = q.background_color;
-    let tol = q.tolerance.clamp(0.0, 100.0) as f64 / 100.0 * 255.0;
+    let tol = q.tolerance.clamp(0.0, 100.0) / 100.0 * 255.0;
     let Some(i) = app.editor.current else { return };
     let doc = app.editor.docs[i].doc.clone();
     let Some(img) = app.editor.renderer.flatten(&doc, doc.page()) else { return };

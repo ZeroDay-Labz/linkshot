@@ -159,7 +159,7 @@ pub fn edge(img: &RgbaImage, kind: linkshot_core::enums::EdgeType, size: u32, to
     let size = size.max(1) as f32;
     let profile = |t: f32, seed: u32| -> f32 {
         match kind {
-            Torn => { let n = ((t * 7.3 + seed as f32).sin() * 43758.5453).fract().abs(); 0.3 + 0.7 * n }
+            Torn => { let n = ((t * 7.3 + seed as f32).sin() * 43_758.547).fract().abs(); 0.3 + 0.7 * n }
             Wave => 0.5 + 0.5 * (t * std::f32::consts::TAU * 2.0 / size).sin(),
             Saw => ((t / size) % 1.0).abs(),
             Sharktooth => 1.0 - ((t / size) % 1.0 - 0.5).abs() * 2.0,
