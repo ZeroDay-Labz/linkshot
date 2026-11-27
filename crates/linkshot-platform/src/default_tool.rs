@@ -51,7 +51,7 @@ impl Identity {
             return Self { desktop_id: id.clone(), capture_command: vec!["flatpak".into(), "run".into(), format!("--command=linkshot"), id, "--capture".into()] };
         }
         let exe = std::env::current_exe().map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|_| "linkshot".into());
-        Self { desktop_id: "linkshot".into(), capture_command: vec![exe, "--capture".into()] }
+        Self { desktop_id: crate::APP_ID.into(), capture_command: vec![exe, "--capture".into()] }
     }
     fn service_component(&self) -> String { format!("{}.desktop", self.desktop_id) }
 }
@@ -114,6 +114,8 @@ pub mod kde {
     const SERVICE: &str = "org.kde.kglobalaccel";
     const PATH: &str = "/kglobalaccel";
     const IFACE: &str = "org.kde.KGlobalAccel";
+    /// The kglobalaccel component of the desktop file before it was named after the app id.
+    const LEGACY_COMPONENT: &str = "linkshot.desktop";
 
     #[derive(Clone, Debug)]
     pub struct Holder { pub component: String, pub component_friendly: String, pub action: String, pub action_friendly: String }
@@ -142,10 +144,12 @@ pub mod kde {
             r.step(format!("Print Screen taken away from {} ({})", h.component_friendly, h.action_friendly));
             // A LinkShot shortcut that the portal filed under another application's name (it happens
             // when LinkShot was started from an IDE or terminal launcher) is removed entirely.
-            if h.action == "capture" && h.action_friendly == "Capture" && h.component != "linkshot" {
+            if h.action == "capture" && h.action_friendly == "Capture" && h.component != id.desktop_id {
                 let _ = c.call_method(Some(SERVICE), PATH, Some(IFACE), "unregister", &(h.component.as_str(), h.action.as_str()));
             }
         }
+        // The desktop file was `linkshot.desktop` up to 0.5.0; its registration would launch a stale entry.
+        if ours != LEGACY_COMPONENT { let _ = c.call_method(Some(SERVICE), PATH, Some(IFACE), "unregister", &(LEGACY_COMPONENT, "capture")); }
         let action_id = vec![ours.clone(), "capture".to_string(), "LinkShot".to_string(), "Capture now".to_string()];
         c.call_method(Some(SERVICE), PATH, Some(IFACE), "doRegister", &(action_id.clone(),)).context("doRegister")?;
         c.call_method(Some(SERVICE), PATH, Some(IFACE), "setForeignShortcut", &(action_id, vec![PRINT])).context("setForeignShortcut")?;
@@ -159,6 +163,7 @@ pub mod kde {
         let c = conn()?;
         let ours = id.service_component();
         let _ = c.call_method(Some(SERVICE), PATH, Some(IFACE), "unregister", &(ours.as_str(), "capture"));
+        let _ = c.call_method(Some(SERVICE), PATH, Some(IFACE), "unregister", &(LEGACY_COMPONENT, "capture"));
         r.step("Print Screen no longer bound to LinkShot");
         Ok(())
     }

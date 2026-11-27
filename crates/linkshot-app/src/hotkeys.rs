@@ -75,7 +75,9 @@ impl Hotkeys {
         Self { rx, tx, wake, available: false, error: Some("built without hotkey support".into()), #[cfg(target_os = "linux")] portal: None }
     }
 
-    pub fn poll(&self) -> Vec<HotkeyEvent> {
+    pub fn poll(&mut self) -> Vec<HotkeyEvent> {
+        #[cfg(target_os = "linux")]
+        if let Some(p) = &self.portal { self.error = p.error(); }
         self.rx.try_iter().collect()
     }
 
@@ -169,11 +171,29 @@ mod portal {
     use super::HotkeyEvent;
     use linkshot_core::presets::HotKey;
 
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    /// Ends one portal session: set from the UI thread, awaited by the shortcuts thread.
+    #[derive(Default)]
+    struct Stop { flag: AtomicBool, waker: futures_util::task::AtomicWaker }
+
+    impl Stop {
+        fn request(&self) { self.flag.store(true, Ordering::Release); self.waker.wake(); }
+        fn wait(&self) -> impl std::future::Future<Output = ()> + '_ {
+            std::future::poll_fn(move |cx| {
+                self.waker.register(cx.waker());
+                if self.flag.load(Ordering::Acquire) { std::task::Poll::Ready(()) } else { std::task::Poll::Pending }
+            })
+        }
+    }
+
     #[derive(Default)]
     pub struct PortalShortcuts {
-        generation: u64,
+        stop: Option<Arc<Stop>>,
         thread: Option<std::thread::JoinHandle<()>>,
-        stop: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+        /// The last failure of the portal, shown next to the hotkey settings.
+        error: Arc<parking_lot::Mutex<Option<String>>>,
     }
 
     fn trigger(hk: &HotKey) -> String {
@@ -199,11 +219,15 @@ mod portal {
     }
 
     impl PortalShortcuts {
-        pub fn apply(&mut self, bindings: &[(HotKey, HotkeyEvent)], tx: crossbeam_channel::Sender<HotkeyEvent>, wake: std::sync::Arc<dyn Fn() + Send + Sync>) {
-            if let Some(s) = &self.stop { s.store(true, std::sync::atomic::Ordering::Relaxed); }
-            self.generation += 1;
-            let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        pub fn error(&self) -> Option<String> { self.error.lock().clone() }
+
+        pub fn apply(&mut self, bindings: &[(HotKey, HotkeyEvent)], tx: crossbeam_channel::Sender<HotkeyEvent>, wake: Arc<dyn Fn() + Send + Sync>) {
+            // The previous session is closed, otherwise the desktop keeps its bindings alive and the
+            // new session cannot take the same keys.
+            if let Some(s) = self.stop.take() { s.request(); }
+            let stop = Arc::new(Stop::default());
             self.stop = Some(stop.clone());
+            let error = self.error.clone();
             let bindings: Vec<(String, String, String, HotkeyEvent)> = bindings.iter().filter(|(hk, _)| !hk.is_none()).enumerate().map(|(i, (hk, ev))| {
                 let (id, desc) = match ev {
                     HotkeyEvent::GlobalCapture => ("capture".to_string(), "Capture".to_string()),
@@ -217,24 +241,44 @@ mod portal {
                 };
                 (id, desc, trigger(hk), ev.clone())
             }).collect();
-            if bindings.is_empty() { return; }
-            self.thread = std::thread::Builder::new().name("global-shortcuts".into()).spawn(move || {
-                let res = async_io::block_on(async move {
+            if bindings.is_empty() { *error.lock() = None; return; }
+            let previous = self.thread.take();
+            let spawned = std::thread::Builder::new().name("global-shortcuts".into()).spawn(move || {
+                // Let the previous session close before this one asks for the same keys.
+                if let Some(h) = previous { let _ = h.join(); }
+                let res = async_io::block_on(async {
                     use ashpd::desktop::global_shortcuts::{GlobalShortcuts, NewShortcut};
                     use futures_util::StreamExt;
                     let gs = GlobalShortcuts::new().await?;
                     let session = gs.create_session(ashpd::desktop::CreateSessionOptions::default()).await?;
                     let shortcuts: Vec<NewShortcut> = bindings.iter().map(|(id, desc, trig, _)| NewShortcut::new(id.clone(), desc.clone()).preferred_trigger(Some(trig.as_str()))).collect();
-                    let _bound = gs.bind_shortcuts(&session, &shortcuts, None, ashpd::desktop::global_shortcuts::BindShortcutsOptions::default()).await?.response()?;
+                    let bound = gs.bind_shortcuts(&session, &shortcuts, None, ashpd::desktop::global_shortcuts::BindShortcutsOptions::default()).await;
+                    let bound = match bound.and_then(|r| r.response()) { Ok(b) => b, Err(e) => { let _ = session.close().await; return Err(e); } };
+                    for s in bound.shortcuts() { tracing::info!("global shortcut {} = {}", s.id(), s.trigger_description()); }
+                    *error.lock() = None;
                     let mut activated = gs.receive_activated().await?;
-                    while let Some(ev) = activated.next().await {
-                        if stop.load(std::sync::atomic::Ordering::Relaxed) { break; }
-                        if let Some((_, _, _, e)) = bindings.iter().find(|(id, _, _, _)| id == ev.shortcut_id()) { let _ = tx.send(e.clone()); wake(); }
+                    let mut stopped = std::pin::pin!(stop.wait());
+                    loop {
+                        match futures_util::future::select(activated.next(), stopped.as_mut()).await {
+                            futures_util::future::Either::Left((Some(ev), _)) => {
+                                if let Some((_, _, _, e)) = bindings.iter().find(|(id, _, _, _)| id == ev.shortcut_id()) { let _ = tx.send(e.clone()); wake(); }
+                            }
+                            futures_util::future::Either::Left((None, _)) | futures_util::future::Either::Right(_) => break,
+                        }
                     }
+                    let _ = session.close().await;
                     Ok::<(), ashpd::Error>(())
                 });
-                if let Err(e) = res { tracing::warn!("GlobalShortcuts portal: {e}"); }
-            }).ok();
+                if let Err(e) = res {
+                    tracing::warn!("GlobalShortcuts portal: {e}");
+                    *error.lock() = Some(format!("Global shortcuts unavailable: {e}"));
+                    wake();
+                }
+            });
+            match spawned {
+                Ok(h) => self.thread = Some(h),
+                Err(e) => *self.error.lock() = Some(format!("Global shortcuts unavailable: {e}")),
+            }
         }
     }
 }

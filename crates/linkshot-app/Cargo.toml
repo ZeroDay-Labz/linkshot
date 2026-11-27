@@ -76,7 +76,7 @@ recommends = "xdg-desktop-portal, libgtk-3-0"
 assets = [
     ["target/release/linkshot", "usr/bin/", "755"],
     ["../../packaging/third-party/bundle/linux/**/*", "usr/lib/linkshot/", "755"],
-    ["../../packaging/linux/linkshot.desktop", "usr/share/applications/", "644"],
+    ["../../packaging/linux/io.github.zerodaylabz.LinkShot.desktop", "usr/share/applications/", "644"],
     ["../../packaging/linux/io.github.zerodaylabz.LinkShot.metainfo.xml", "usr/share/metainfo/", "644"],
     ["../../assets/linkshot.svg", "usr/share/icons/hicolor/scalable/apps/linkshot.svg", "644"],
     ["../../packaging/icons/linkshot-16.png", "usr/share/icons/hicolor/16x16/apps/linkshot.png", "644"],
@@ -100,7 +100,7 @@ auto-req = "no"
 assets = [
     { source = "target/release/linkshot", dest = "/usr/bin/linkshot", mode = "755" },
     { source = "packaging/third-party/bundle/linux/**/*", dest = "/usr/lib/linkshot/", mode = "755" },
-    { source = "packaging/linux/linkshot.desktop", dest = "/usr/share/applications/linkshot.desktop", mode = "644" },
+    { source = "packaging/linux/io.github.zerodaylabz.LinkShot.desktop", dest = "/usr/share/applications/io.github.zerodaylabz.LinkShot.desktop", mode = "644" },
     { source = "packaging/linux/io.github.zerodaylabz.LinkShot.metainfo.xml", dest = "/usr/share/metainfo/io.github.zerodaylabz.LinkShot.metainfo.xml", mode = "644" },
     { source = "assets/linkshot.svg", dest = "/usr/share/icons/hicolor/scalable/apps/linkshot.svg", mode = "644" },
     { source = "packaging/icons/linkshot-16.png", dest = "/usr/share/icons/hicolor/16x16/apps/linkshot.png", mode = "644" },

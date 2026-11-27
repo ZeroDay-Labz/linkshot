@@ -13,9 +13,36 @@ mod overlay;
 mod raise;
 mod recording_hud;
 
-/// Window app id: the Flatpak id inside the sandbox (so the desktop matches our windows to the
-/// exported desktop file and icon), `linkshot` otherwise.
-pub fn app_id() -> String { std::env::var("FLATPAK_ID").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "linkshot".to_string()) }
+/// Window app id, so the desktop matches our windows to the desktop file and icon: the Flatpak id
+/// inside the sandbox, [`linkshot_platform::APP_ID`] (the same id) otherwise.
+pub fn app_id() -> String { std::env::var("FLATPAK_ID").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| linkshot_platform::APP_ID.to_string()) }
+
+/// Gives the desktop portals our app id. Sandboxed apps get it from Flatpak; a host process gets it
+/// from its systemd scope, which is wrong or missing when LinkShot is started from a terminal, an IDE
+/// or an autostart entry, and then the GlobalShortcuts portal refuses with "An app id is required".
+/// `org.freedesktop.host.portal.Registry` fixes that, but only before the connection's first portal
+/// call, so this runs first thing. The desktop file it refers to must exist, so that is written first.
+#[cfg(target_os = "linux")]
+fn identify_to_desktop() {
+    if std::env::var_os("FLATPAK_ID").is_some() { return; }
+    {
+        match linkshot_capture::kwin::ensure_authorization("LinkShot", linkshot_platform::APP_ID) {
+            Ok(true) => tracing::info!("updated LinkShot's desktop file"),
+            Ok(false) => {}
+            Err(e) => tracing::warn!("could not install desktop file: {e}"),
+        }
+    }
+    linkshot_platform::autostart::repair();
+    let res = async_io::block_on(async {
+        let id: ashpd::AppID = linkshot_platform::APP_ID.parse()?;
+        ashpd::register_host_app(id).await
+    });
+    match res {
+        Ok(()) => tracing::info!("registered with the desktop portals as {}", linkshot_platform::APP_ID),
+        // Portals before 1.19 have no registry; they fall back to the systemd scope.
+        Err(e) => tracing::info!("portal host registration unavailable: {e}"),
+    }
+}
 mod screen_draw;
 mod live_sampler;
 mod scrolling_hud;
@@ -45,7 +72,7 @@ fn main() -> eframe::Result<()> {
         #[cfg(target_os = "linux")]
         {
             println!("flatpak: {}  kde: {}  wayland: {}", std::env::var("FLATPAK_ID").unwrap_or_else(|_| "no".into()), linkshot_capture::kwin::is_kde(), linkshot_capture::is_wayland());
-            if linkshot_capture::kwin::is_kde() && std::env::var_os("FLATPAK_ID").is_none() { let _ = linkshot_capture::kwin::ensure_authorization("LinkShot", "linkshot"); }
+            identify_to_desktop();
             println!("live backend: {:?}", linkshot_capture::live::probe());
             if linkshot_capture::kwin::is_kde() { match linkshot_capture::kwin::capture_area(0, 0, 2, 2, false) { Ok(i) => println!("KWin CaptureArea 2x2: ok {}x{}", i.width(), i.height()), Err(e) => println!("KWin CaptureArea 2x2 FAILED: {e:#}") } }
             match linkshot_capture::kwin::window_list() { Ok(w) => { println!("KWin window list: {} windows", w.len()); for x in w.iter().take(8) { println!("  {:>5},{:>5} {:>5}x{:<5} {}", x.x, x.y, x.width, x.height, x.title.chars().take(50).collect::<String>()); } } Err(e) => println!("KWin window list FAILED: {e:#}") }
@@ -77,6 +104,8 @@ fn main() -> eframe::Result<()> {
     // (or to capture) and exits.
     let request = if capture { single_instance::Request::Capture } else if background { single_instance::Request::Ping } else { single_instance::Request::Show };
     if single_instance::forward(request) { tracing::info!("linkshot is already running; request forwarded"); return Ok(()); }
+    #[cfg(target_os = "linux")]
+    identify_to_desktop();
     // The root window is a tiny invisible controller (see `keepalive.rs`); the Capture window,
     // the Editor and the overlays are child viewports. Minimising or hiding any of them therefore
     // never stops the event loop that handles hotkeys, tray clicks and timers.

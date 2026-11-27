@@ -191,20 +191,24 @@ impl App {
             status: None,
             interval_timer: None,
         };
+        // Print Screen was handed to LinkShot earlier, but the binding is gone or points elsewhere (a
+        // reinstall, a switch between the Flatpak and the package, the desktop file being renamed, a
+        // stale portal entry holding the key): bind it again so the key keeps working.
+        #[cfg(target_os = "linux")]
+        if headless_dark.is_none() && app.settings.system_print_screen && linkshot_platform::default_tool::supported() {
+            let id = linkshot_platform::default_tool::Identity::detect();
+            if !linkshot_platform::default_tool::is_default(&id) {
+                match linkshot_platform::default_tool::make_default(&id) {
+                    Ok(report) => for step in report.steps { tracing::info!("Print Screen repaired: {step}"); },
+                    Err(e) => tracing::warn!("could not restore the Print Screen binding: {e:#}"),
+                }
+            }
+        }
         app.register_hotkeys();
         if let Some(e) = app.hotkeys.error.clone() { tracing::warn!("{e}"); }
         #[cfg(target_os = "linux")]
         linkshot_capture::screencast::configure(linkshot_capture::screencast::Tokens { plain: app.settings.screencast_token.clone(), cursor: app.settings.screencast_token_cursor.clone() });
-        #[cfg(target_os = "linux")]
-        if headless_dark.is_none() && linkshot_capture::kwin::is_kde() && std::env::var_os("FLATPAK_ID").is_none() {
-            // The desktop file authorises KWin's ScreenShot2 interface and carries the "capture" action
-            // that the system-wide Print Screen shortcut launches (see `default_tool`).
-            match linkshot_capture::kwin::ensure_authorization("LinkShot", "linkshot") {
-                Ok(true) => tracing::info!("installed desktop file for KWin screenshot authorisation"),
-                Ok(false) => {}
-                Err(e) => tracing::warn!("could not install desktop file: {e}"),
-            }
-        }
+        // The desktop file (KWin authorisation, Print Screen action) is installed by `identify_to_desktop` in main.
         if headless_dark.is_none() && !background && !app.settings.default_tool_prompted && linkshot_platform::default_tool::supported() {
             app.show_default_prompt = true;
         }

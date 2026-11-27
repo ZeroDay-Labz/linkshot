@@ -39,11 +39,16 @@ A prioritised list from a full read-through of the code on 2026-10-18, followed 
    **done** (0.5.0: `linkshot_capture::screencast`, per-monitor PipeWire streams kept open and paused,
    one prompt with a restore token; also the Flatpak's capture path on KDE). Open: the toolbar placement.
 9. **Desktop file** — the self-written `~/.local/share/applications/linkshot.desktop` used
-   `Icon=camera-photo` and could shadow the packaged one. It now carries the capture action and
-   the packaged icon name when installed. **partly done**
+   `Icon=camera-photo` and could shadow the packaged one. Now every build uses one id,
+   `io.github.zerodaylabz.LinkShot` (desktop file, Wayland app id, portal id, kglobalaccel
+   component); the self-written copy is skipped/removed when a package installed it for the same
+   executable; legacy `linkshot.desktop` files and bindings are migrated. Host builds register that
+   id through `org.freedesktop.host.portal.Registry`, fixing "An app id is required" from the
+   GlobalShortcuts portal when launched from a terminal/IDE/autostart. **done**
 10. **GlobalShortcuts portal sessions** — every `apply` spawns a new thread and portal session; old
-    ones linger until their next activation. Keep the session handle and close it; use the preset
-    UUID alone as shortcut id so deleting a preset does not rebind the others.
+    ones linger until their next activation. Sessions are now closed on re-apply (the new one waits
+    for it) and failures show next to the hotkey settings. **mostly done** — still to do: use the
+    preset UUID alone as shortcut id so deleting a preset does not rebind the others.
 11. **Disk growth** — recording masters are never pruned, tray *Delete* leaves the master behind,
     `cache/video` is unbounded, Program/Email temp exports land inside the library. Delete masters
     with their files, cap the caches, write temps to the cache dir.

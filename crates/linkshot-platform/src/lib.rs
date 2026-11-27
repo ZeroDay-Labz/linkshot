@@ -3,6 +3,10 @@
 use anyhow::{Context, Result};
 use image::RgbaImage;
 
+/// LinkShot's application id: the desktop file id (`<APP_ID>.desktop`), the Wayland window app id,
+/// the id the desktop portals file permissions and global shortcuts under, and the Flatpak id.
+pub const APP_ID: &str = "io.github.zerodaylabz.LinkShot";
+
 pub mod clipboard {
     use super::*;
 
@@ -105,13 +109,48 @@ pub mod default_tool;
 pub mod autostart {
     //! "Run linkshot when the system starts".
     use anyhow::Result;
+    /// Named after the app id: systemd's autostart generator turns the file name into the unit name,
+    /// which is where the desktop portals read a host application's id from.
     #[cfg(target_os = "linux")]
     fn desktop_file() -> Option<std::path::PathBuf> {
+        directories::BaseDirs::new().map(|b| b.config_dir().join(format!("autostart/{}.desktop", crate::APP_ID)))
+    }
+    /// The file name used up to 0.5.0.
+    #[cfg(target_os = "linux")]
+    fn legacy_desktop_file() -> Option<std::path::PathBuf> {
         directories::BaseDirs::new().map(|b| b.config_dir().join("autostart/linkshot.desktop"))
     }
+    #[cfg(target_os = "linux")]
+    fn entry(exe: &std::path::Path) -> String {
+        let exe = if exe.to_string_lossy().contains(' ') { format!("\"{}\"", exe.display()) } else { exe.display().to_string() };
+        format!("[Desktop Entry]\nType=Application\nName=LinkShot\nExec={exe} --background\nIcon=linkshot\nX-GNOME-Autostart-enabled=true\n")
+    }
+
+    /// Moves a legacy autostart entry to the current name and points an entry whose program no longer
+    /// exists (a moved build, a reinstalled package) at the running executable.
+    pub fn repair() {
+        #[cfg(target_os = "linux")]
+        {
+            let (Some(p), Some(old)) = (desktop_file(), legacy_desktop_file()) else { return };
+            let Ok(exe) = std::env::current_exe() else { return };
+            if old.exists() {
+                let _ = std::fs::remove_file(&old);
+                if let Some(dir) = p.parent() { let _ = std::fs::create_dir_all(dir); }
+                let _ = std::fs::write(&p, entry(&exe));
+                return;
+            }
+            let Ok(text) = std::fs::read_to_string(&p) else { return };
+            let target = text.lines().find_map(|l| l.strip_prefix("Exec=")).map(|e| {
+                let e = e.trim();
+                if let Some(rest) = e.strip_prefix('"') { rest.split('"').next().unwrap_or("").to_string() } else { e.split_whitespace().next().unwrap_or("").to_string() }
+            });
+            if target.map(|t| !std::path::Path::new(&t).exists()).unwrap_or(true) { let _ = std::fs::write(&p, entry(&exe)); }
+        }
+    }
+
     pub fn is_enabled() -> bool {
         #[cfg(target_os = "linux")]
-        { return desktop_file().map(|p| p.exists()).unwrap_or(false); }
+        { return desktop_file().map(|p| p.exists()).unwrap_or(false) || legacy_desktop_file().map(|p| p.exists()).unwrap_or(false); }
         #[cfg(windows)]
         { return windows_run_key(&["query", RUN_KEY, "/v", "LinkShot"]).is_ok(); }
         #[cfg(not(any(target_os = "linux", windows)))]
@@ -134,10 +173,11 @@ pub mod autostart {
             if enabled {
                 std::fs::create_dir_all(p.parent().unwrap())?;
                 let exe = std::env::current_exe()?;
-                std::fs::write(&p, format!("[Desktop Entry]\nType=Application\nName=LinkShot\nExec={} --background\nX-GNOME-Autostart-enabled=true\n", exe.display()))?;
+                std::fs::write(&p, entry(&exe))?;
             } else if p.exists() {
                 std::fs::remove_file(p)?;
             }
+            if let Some(old) = legacy_desktop_file() { if old.exists() { let _ = std::fs::remove_file(old); } }
         }
         #[cfg(windows)]
         {

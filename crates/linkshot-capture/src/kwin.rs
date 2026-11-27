@@ -117,22 +117,66 @@ pub fn capture_active_window(include_cursor: bool) -> Result<RgbaImage> {
     call("CaptureActiveWindow", Args::None, include_cursor)
 }
 
-/// Writes `~/.local/share/applications/linkshot.desktop` naming the current executable so KWin
-/// authorises the ScreenShot2 interface. Returns true when a file was written or updated.
+/// Line that marks desktop files LinkShot wrote itself (they may be replaced or removed).
+const GENERATED_MARK: &str = "X-LinkShot-Generated=true";
+
+/// Writes `~/.local/share/applications/<desktop_id>.desktop` naming the current executable so KWin
+/// authorises the ScreenShot2 interface, the portals can resolve the app id, and kglobalaccel can
+/// launch the `capture` action. When a package already installed that desktop file for this
+/// executable, nothing is written (and an earlier self-written copy is removed so it does not shadow
+/// the packaged one). Returns true when a file was written, updated or removed.
 pub fn ensure_authorization(app_name: &str, desktop_id: &str) -> Result<bool> {
     let exe = std::env::current_exe()?;
-    let dir = std::env::var_os("XDG_DATA_HOME").map(std::path::PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/share"))).context("no home")?.join("applications");
-    std::fs::create_dir_all(&dir)?;
+    let data_home = std::env::var_os("XDG_DATA_HOME").map(std::path::PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/share"))).context("no home")?;
+    let dir = data_home.join("applications");
     let path = dir.join(format!("{desktop_id}.desktop"));
+    let mut changed = false;
+    // Up to 0.5.0 the file was `linkshot.desktop`; remove that copy if we wrote it.
+    if desktop_id != "linkshot" {
+        let legacy = dir.join("linkshot.desktop");
+        if std::fs::read_to_string(&legacy).map(|c| is_generated(&c)).unwrap_or(false) { let _ = std::fs::remove_file(&legacy); changed = true; }
+    }
+    if packaged_entry_for(desktop_id, &exe) {
+        if std::fs::read_to_string(&path).map(|c| is_generated(&c)).unwrap_or(false) { std::fs::remove_file(&path)?; changed = true; }
+        if changed { rebuild_service_cache(); }
+        return Ok(changed);
+    }
+    std::fs::create_dir_all(&dir)?;
     let icon = std::env::var("LINKSHOT_ICON").ok().unwrap_or_else(|| "camera-photo".into());
-    let content = format!("[Desktop Entry]\nType=Application\nName={app_name}\nComment=Screen capture and editor\nExec={} %U\nTryExec={}\nIcon={icon}\nTerminal=false\nCategories=Graphics;Utility;\nStartupWMClass=linkshot\nX-KDE-DBUS-Restricted-Interfaces=org.kde.KWin.ScreenShot2\nActions=capture;\n\n[Desktop Action capture]\nName=Capture now\nExec={} --capture\n", exe.display(), exe.display(), exe.display());
-    if std::fs::read_to_string(&path).map(|c| c == content).unwrap_or(false) { return Ok(false); }
-    std::fs::write(&path, content)?;
-    // Refresh the KService cache so KWin sees the new desktop file.
+    let exe_q = if exe.to_string_lossy().contains(' ') { format!("\"{}\"", exe.display()) } else { exe.display().to_string() };
+    let content = format!("[Desktop Entry]\nType=Application\nName={app_name}\nComment=Screen capture and editor\nExec={exe_q} %U\nTryExec={}\nIcon={icon}\nTerminal=false\nCategories=Graphics;Utility;\nStartupWMClass={desktop_id}\nX-KDE-DBUS-Restricted-Interfaces=org.kde.KWin.ScreenShot2\n{GENERATED_MARK}\nActions=capture;\n\n[Desktop Action capture]\nName=Capture now\nExec={exe_q} --capture\n", exe.display());
+    if !std::fs::read_to_string(&path).map(|c| c == content).unwrap_or(false) {
+        std::fs::write(&path, content)?;
+        changed = true;
+    }
+    if changed { rebuild_service_cache(); }
+    Ok(changed)
+}
+
+fn is_generated(content: &str) -> bool {
+    // Files from 0.5.0 and earlier carry no mark but have this exact comment.
+    content.lines().any(|l| l == GENERATED_MARK) || content.lines().any(|l| l == "Comment=Screen capture and editor")
+}
+
+/// Is `<desktop_id>.desktop` installed system-wide (by the deb/rpm) for this executable?
+fn packaged_entry_for(desktop_id: &str, exe: &std::path::Path) -> bool {
+    let dirs = std::env::var("XDG_DATA_DIRS").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "/usr/local/share:/usr/share".into());
+    dirs.split(':').any(|d| {
+        let Ok(text) = std::fs::read_to_string(std::path::Path::new(d).join("applications").join(format!("{desktop_id}.desktop"))) else { return false };
+        let Some(prog) = text.lines().find_map(|l| l.strip_prefix("Exec=")).and_then(|e| e.split_whitespace().next()).map(|p| p.trim_matches('"').to_string()) else { return false };
+        let resolved = if prog.contains('/') { std::path::PathBuf::from(&prog) } else {
+            match std::env::var_os("PATH").and_then(|path| std::env::split_paths(&path).map(|p| p.join(&prog)).find(|p| p.is_file())) { Some(p) => p, None => return false }
+        };
+        let canon = |p: &std::path::Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+        canon(&resolved) == canon(exe)
+    })
+}
+
+/// Refreshes the KService cache so KWin and kglobalaccel see desktop file changes.
+fn rebuild_service_cache() {
     for tool in ["kbuildsycoca6", "kbuildsycoca5"] {
         if let Ok(mut c) = std::process::Command::new(tool).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn() { let _ = c.wait(); break; }
     }
-    Ok(true)
 }
 
 /// A script loaded into KWin (`org.kde.kwin.Scripting`). Scripts run inside the compositor, so
