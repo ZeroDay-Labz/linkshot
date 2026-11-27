@@ -130,7 +130,9 @@ pub fn transparent_button(ui: &mut Ui, p: &Palette) -> Response {
 
 /// A click-then-press hotkey field. `editing` holds the id of the field currently listening.
 /// Returns `(changed, warning)`; bare letters/digits are refused unless `allow_bare`.
-pub fn hotkey_editor(ui: &mut Ui, p: &Palette, hk: &mut linkshot_core::presets::HotKey, editing: &mut Option<String>, id: &str, allow_bare: bool) -> (bool, Option<String>) {
+/// `delivered` is a combination a global shortcut received while this field listened (see
+/// `App::poll_events`); it is taken as the field's new value.
+pub fn hotkey_editor(ui: &mut Ui, p: &Palette, hk: &mut linkshot_core::presets::HotKey, editing: &mut Option<String>, id: &str, allow_bare: bool, delivered: &mut Option<linkshot_core::presets::HotKey>) -> (bool, Option<String>) {
     use linkshot_core::presets::HotKey;
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(170.0, 22.0), Sense::click());
     let is_editing = editing.as_deref() == Some(id);
@@ -144,6 +146,9 @@ pub fn hotkey_editor(ui: &mut Ui, p: &Palette, hk: &mut linkshot_core::presets::
     if resp.clicked() { *editing = if is_editing { None } else { Some(id.to_string()) }; }
     let mut changed = false;
     let mut warning = None;
+    if is_editing {
+        if let Some(d) = delivered.take() { *hk = d; *editing = None; return (true, None); }
+    }
     if prtsc {
         let mods = ui.ctx().input(|i| i.modifiers);
         *hk = HotKey { key: "PrintScreen".into(), ctrl: mods.ctrl, alt: mods.alt, shift: mods.shift, win: mods.command && !mods.ctrl };

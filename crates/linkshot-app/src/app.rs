@@ -100,6 +100,10 @@ pub struct App {
     pub show_about: bool,
     /// Which hotkey field in Preferences is listening for keys.
     pub prefs_hotkey_editing: Option<String>,
+    /// A combination a global shortcut delivered while a hotkey field was listening (see `poll_events`).
+    pub pending_hotkey_input: Option<linkshot_core::presets::HotKey>,
+    /// When the current capture was triggered (for the timing log).
+    pub capture_t0: Option<Instant>,
     /// First-run question: make LinkShot the system's screenshot tool (Print Screen).
     pub show_default_prompt: bool,
     /// Live overlay: the region grab running after the overlay went blank.
@@ -182,6 +186,8 @@ impl App {
             last_save: Instant::now(),
             show_prefs: false,
             prefs_hotkey_editing: None,
+            pending_hotkey_input: None,
+            capture_t0: None,
             show_about: false,
             show_default_prompt: false,
             live_capture: None,
@@ -261,7 +267,8 @@ impl App {
         self.status = Some((s.into(), Instant::now()));
     }
 
-    pub fn register_hotkeys(&mut self) {
+    /// Every global hotkey with the event it raises.
+    fn hotkey_bindings(&self) -> Vec<(linkshot_core::presets::HotKey, HotkeyEvent)> {
         let mut b = vec![
             (self.presets.global_hot_key.clone(), HotkeyEvent::GlobalCapture),
             (self.settings.hotkey_show_hide.clone(), HotkeyEvent::ShowHide),
@@ -272,9 +279,18 @@ impl App {
             (self.settings.hotkey_draw_mode.clone(), HotkeyEvent::DrawMode),
         ];
         for p in &self.presets.presets { b.push((p.hot_key.clone(), HotkeyEvent::Preset(p.id.clone()))); }
-        // When the desktop itself launches `linkshot --capture` on Print Screen, claiming the key here too
-        // would conflict (Linux); on Windows the in-app registration is what receives the key.
-        if self.settings.system_print_screen && cfg!(target_os = "linux") {
+        b
+    }
+
+    /// True while a hotkey field is waiting for a key combination.
+    pub fn hotkey_field_listening(&self) -> bool { self.capture.editing_hotkey_for.is_some() || self.prefs_hotkey_editing.is_some() }
+
+    pub fn register_hotkeys(&mut self) {
+        let mut b = self.hotkey_bindings();
+        // On GNOME the desktop itself launches `linkshot --capture` on Print Screen, so claiming the key
+        // here too would conflict. On KDE the portal session below *is* what receives Print (see
+        // `default_tool::kde`), and on Windows the in-app registration is.
+        if self.settings.system_print_screen && cfg!(target_os = "linux") && linkshot_platform::default_tool::desktop() != linkshot_platform::default_tool::Desktop::Kde {
             b.retain(|(hk, _)| !matches!(hk.key.as_str(), "PrintScreen" | "Snapshot") || hk.ctrl || hk.alt || hk.shift || hk.win);
         }
         self.hotkeys.apply(&b);
@@ -490,15 +506,19 @@ impl App {
                 }
             }
         }
+        self.capture_t0 = Some(Instant::now());
         self.capture_was_visible = self.capture_visible;
         let mut hidden = false;
         if self.settings.hide_linkshot_during_capture && !schedule {
             // Not showing the viewports closes their windows (works on Wayland too, unlike
-            // set_visible); `restore_windows` brings the Capture window back afterwards.
+            // set_visible); `restore_windows` brings the Capture window back afterwards. The windows
+            // need a moment to disappear from the screen, but only if one was showing: from the tray
+            // (the usual Print Screen case) the overlay comes up right away.
+            let any_visible = self.capture_visible || self.editor_visible;
             self.capture_visible = false;
             self.editor_visible = false;
             hidden = true;
-            delay += Duration::from_millis(300);
+            if any_visible { delay += Duration::from_millis(300); }
         }
         let bubble_pos = if countdown {
             linkshot_capture::monitors().ok().and_then(|ms| ms.iter().find(|m| m.is_primary).or(ms.first()).map(|m| [m.x as f32 + m.width as f32 - COUNTDOWN_W - 24.0, m.y as f32 + m.height as f32 - COUNTDOWN_H - 72.0]))
@@ -526,8 +546,11 @@ impl App {
         // (or no live back-end exists, e.g. X11 without a compositor).
         let interactive = !matches!(settings.selection_mode, SelectionMode::SelectionModeFullscreen | SelectionMode::SelectionModeClipboard | SelectionMode::SelectionModeFile)
             && !(settings.selection_mode == SelectionMode::SelectionModeRegion && settings.selection_settings_region.region_selection_type == RegionSelectionType::RegionSelectionFixed);
+        let t_probe = Instant::now();
         let backend = if interactive && !self.settings.freeze_screen_during_capture { linkshot_capture::live::probe() } else { None };
+        let t_layout = Instant::now();
         let grabbed = match backend { Some(_) => linkshot_capture::layout(), None => linkshot_capture::snapshot_with_cursor(settings.capture_cursor) };
+        tracing::info!("capture timing: since trigger {} ms, probe {} ms ({backend:?}), layout {} ms", self.capture_t0.map(|t| t.elapsed().as_millis()).unwrap_or(0), (t_layout - t_probe).as_millis(), t_layout.elapsed().as_millis());
         match grabbed {
             Err(e) => { self.set_status(format!("Capture failed: {e:#}")); self.restore_windows(ctx); }
             Ok(snap) => {
@@ -737,6 +760,13 @@ impl App {
 
     fn poll_events(&mut self, ctx: &egui::Context) {
         for ev in self.hotkeys.poll() {
+            // A hotkey field is listening: the desktop delivered the combination to our global shortcut
+            // instead of the field (Print Screen always is), so hand the combination to the field rather
+            // than acting on it.
+            if self.hotkey_field_listening() {
+                if let Some((hk, _)) = self.hotkey_bindings().into_iter().find(|(_, e)| *e == ev) { self.pending_hotkey_input = Some(hk); ctx.request_repaint(); }
+                continue;
+            }
             match ev {
                 HotkeyEvent::GlobalCapture => { let s = self.presets.selected().clone(); self.start_capture(ctx, s); }
                 HotkeyEvent::ShowHide => self.dispatch(ctx, Action::ToggleCaptureWindow),
@@ -856,7 +886,7 @@ impl eframe::App for App {
                     if !o.placement_started {
                         o.placement_started = true;
                         let map: Vec<(String, String)> = shown.iter().map(|(_, name, _)| (format!("linkshot capture overlay {name}"), name.clone())).collect();
-                        std::thread::spawn(move || { if let Err(e) = linkshot_capture::kwin::ensure_fullscreen_placement(&map) { tracing::warn!("KWin placement: {e:#}"); } });
+                        std::thread::spawn(move || { let t = Instant::now(); if let Err(e) = linkshot_capture::kwin::ensure_fullscreen_placement(&map) { tracing::warn!("KWin placement: {e:#}"); } tracing::info!("capture timing: KWin placement of {} overlays took {} ms", map.len(), t.elapsed().as_millis()); });
                     }
                 }
             }

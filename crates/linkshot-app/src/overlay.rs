@@ -38,6 +38,8 @@ enum Phase {
 struct Blank { result: OverlayResult, since: std::time::Instant, painted: Vec<u32>, passthrough_sent: Vec<bool> }
 
 pub struct Overlay {
+    /// When the overlay was built (timing log of the first paint).
+    created: std::time::Instant,
     pub snapshot: Snapshot,
     pub settings: CaptureSettings,
     textures: Vec<Option<egui::TextureHandle>>,
@@ -70,7 +72,7 @@ pub struct Overlay {
 impl Overlay {
     pub fn new(snapshot: Snapshot, monitor_idx: usize, settings: CaptureSettings, show_magnifier: bool) -> Self {
         let n = snapshot.monitors.len();
-        Self { snapshot, settings, textures: (0..n).map(|_| None).collect(), phase: Phase::Selecting { drag_start: None }, show_magnifier, result: None, blank: None, sampler: None, loupe: None, focus_sent: false, hover_window: None, hud_drag: Vec2::ZERO, resize: None, width_text: String::new(), height_text: String::new(), frames: 0, placement_started: false, active_monitor: monitor_idx, single_monitor: None, single_resolved: false, drag_point: std::cell::Cell::new(Pt::new(0.0, 0.0)) }
+        Self { snapshot, settings, textures: (0..n).map(|_| None).collect(), phase: Phase::Selecting { drag_start: None }, show_magnifier, result: None, blank: None, sampler: None, loupe: None, focus_sent: false, hover_window: None, hud_drag: Vec2::ZERO, resize: None, width_text: String::new(), height_text: String::new(), frames: 0, placement_started: false, active_monitor: monitor_idx, single_monitor: None, single_resolved: false, drag_point: std::cell::Cell::new(Pt::new(0.0, 0.0)), created: std::time::Instant::now() }
     }
 
     /// Live mode: no frozen images, the crosshairs are drawn over the real screen.
@@ -142,6 +144,7 @@ impl Overlay {
 
     pub fn ui(&mut self, ctx: &egui::Context, pal: &Palette, m: usize) {
         self.frames += 1;
+        if self.frames == 1 || self.frames == 4 { tracing::info!("capture timing: overlay frame {} at {} ms after it was built", self.frames, self.created.elapsed().as_millis()); }
         let m = if self.single_monitor.is_some() { self.resolve_single(ctx) } else { m.min(self.snapshot.monitors.len().saturating_sub(1)) };
         // Keys only reach the focused window: focus the one under the pointer once.
         if !self.focus_sent && m == self.active_monitor { self.focus_sent = true; ctx.send_viewport_cmd(egui::ViewportCommand::Focus); }

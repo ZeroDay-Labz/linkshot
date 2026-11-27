@@ -268,6 +268,13 @@ impl App {
         // desktop usually grabs it), so it is offered as a chip while the field listens.
         let prtsc = if editing { crate::widgets::print_screen_chip(ui, &pal, rect, ui.id().with(("hk-prtsc", key))) } else { false };
         if resp.clicked() { self.capture.editing_hotkey_for = if editing { None } else { Some(key.to_string()) }; }
+        if editing {
+            if let Some(hk) = self.pending_hotkey_input.take() {
+                self.set_hotkey(key, hk);
+                self.capture.editing_hotkey_for = None;
+                return;
+            }
+        }
         if prtsc {
             let mods = ui.ctx().input(|i| i.modifiers);
             self.set_hotkey(key, HotKey { key: "PrintScreen".into(), ctrl: mods.ctrl, alt: mods.alt, shift: mods.shift, win: mods.command && !mods.ctrl });

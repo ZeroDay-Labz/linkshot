@@ -1324,6 +1324,7 @@ fn preferences_window(app: &mut App, ctx: &egui::Context, _actions: &mut Vec<Act
             changed |= ui.checkbox(&mut s.run_at_startup, "Run LinkShot when the system starts").changed();
             ui.label(egui::RichText::new("Hotkeys").strong());
             ui.label(egui::RichText::new(format!("Capture: {} (set it under the Capture button)", app.presets.global_hot_key.display())).small());
+            let mut delivered = app.pending_hotkey_input.take();
             let editing = &mut app.prefs_hotkey_editing;
             egui::Grid::new("hotkeys-grid").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
                 for (label, id, hk) in [
@@ -1335,7 +1336,7 @@ fn preferences_window(app: &mut App, ctx: &egui::Context, _actions: &mut Vec<Act
                     ("Enter / exit Screen Draw", "draw-mode", &mut s.hotkey_draw_mode),
                 ] {
                     ui.label(label);
-                    let (c, warn) = crate::widgets::hotkey_editor(ui, &pal, hk, editing, id, false);
+                    let (c, warn) = crate::widgets::hotkey_editor(ui, &pal, hk, editing, id, false, &mut delivered);
                     if c { changed = true; rebind = true; }
                     if let Some(w) = warn { hotkey_warning = Some(w); }
                     ui.end_row();

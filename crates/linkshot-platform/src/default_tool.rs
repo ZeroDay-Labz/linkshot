@@ -59,7 +59,7 @@ impl Identity {
 /// Is Print Screen currently bound to LinkShot system-wide?
 pub fn is_default(id: &Identity) -> bool {
     match desktop() {
-        Desktop::Kde => kde::holders_of_print().map(|h| h.iter().any(|x| x.component == id.service_component())).unwrap_or(false),
+        Desktop::Kde => kde::is_default(id),
         Desktop::Gnome => gnome::is_default(),
         Desktop::Windows => windows::is_default(),
         _ => false,
@@ -135,35 +135,43 @@ pub mod kde {
         c.call_method(Some(SERVICE), PATH, Some(IFACE), "setForeignShortcut", &(id, keys)).map(|_| ()).with_context(|| format!("setForeignShortcut {component}/{action}"))
     }
 
+    /// The portal's shortcut component is the app id; its "capture" action is the one the running
+    /// LinkShot listens to.
+    fn portal_action(id: &Identity) -> Vec<String> { vec![id.desktop_id.clone(), "capture".into(), "LinkShot".into(), "Capture".into()] }
+
+    /// Is Print bound to the running app's portal "capture" shortcut?
+    pub fn is_default(id: &Identity) -> bool {
+        holders_of_print().map(|h| h.iter().any(|x| x.component == id.desktop_id && x.action == "capture")).unwrap_or(false)
+    }
+
+    /// Print goes to the GlobalShortcuts portal session of the running LinkShot (which starts at
+    /// login). A binding on the desktop file's "capture" action is not used: kglobalaccel stores such
+    /// a runtime-registered service shortcut and launches it when invoked, but does not arm the key
+    /// (verified on Plasma 6.8), so pressing Print did nothing.
     pub fn make_default(id: &Identity, r: &mut Report) -> Result<()> {
         let c = conn()?;
-        let ours = id.service_component();
+        let portal = portal_action(id);
         for h in holders_of_print()? {
-            if h.component == ours && h.action == "capture" { continue; }
+            if h.component == id.desktop_id && h.action == "capture" { continue; }
             set_keys(&c, &h.component, &h.action, &h.component_friendly, &h.action_friendly, vec![])?;
             r.step(format!("Print Screen taken away from {} ({})", h.component_friendly, h.action_friendly));
             // A LinkShot shortcut that the portal filed under another application's name (it happens
             // when LinkShot was started from an IDE or terminal launcher) is removed entirely.
-            if h.action == "capture" && h.action_friendly == "Capture" && h.component != id.desktop_id {
-                let _ = c.call_method(Some(SERVICE), PATH, Some(IFACE), "unregister", &(h.component.as_str(), h.action.as_str()));
-            }
+            if h.action == "capture" && h.action_friendly == "Capture" { let _ = c.call_method(Some(SERVICE), PATH, Some(IFACE), "unregister", &(h.component.as_str(), h.action.as_str())); }
         }
-        // The desktop file was `linkshot.desktop` up to 0.5.0; its registration would launch a stale entry.
-        if ours != LEGACY_COMPONENT { let _ = c.call_method(Some(SERVICE), PATH, Some(IFACE), "unregister", &(LEGACY_COMPONENT, "capture")); }
-        let action_id = vec![ours.clone(), "capture".to_string(), "LinkShot".to_string(), "Capture now".to_string()];
-        c.call_method(Some(SERVICE), PATH, Some(IFACE), "doRegister", &(action_id.clone(),)).context("doRegister")?;
-        c.call_method(Some(SERVICE), PATH, Some(IFACE), "setForeignShortcut", &(action_id, vec![PRINT])).context("setForeignShortcut")?;
-        let ok = holders_of_print()?.iter().any(|h| h.component == ours);
-        anyhow::ensure!(ok, "kglobalaccel did not accept the binding");
-        r.step("Print Screen now starts a LinkShot capture (KDE global shortcut)");
+        // Desktop-file bindings from earlier versions (never armed, see above).
+        for comp in [id.service_component(), LEGACY_COMPONENT.to_string()] { let _ = c.call_method(Some(SERVICE), PATH, Some(IFACE), "unregister", &(comp.as_str(), "capture")); }
+        c.call_method(Some(SERVICE), PATH, Some(IFACE), "doRegister", &(portal.clone(),)).context("doRegister")?;
+        c.call_method(Some(SERVICE), PATH, Some(IFACE), "setForeignShortcut", &(portal, vec![PRINT])).context("setForeignShortcut")?;
+        anyhow::ensure!(is_default(id), "kglobalaccel did not accept the binding");
+        r.step("Print Screen now starts a LinkShot capture (KDE global shortcut of the running LinkShot)");
         Ok(())
     }
 
     pub fn undo(id: &Identity, r: &mut Report) -> Result<()> {
         let c = conn()?;
-        let ours = id.service_component();
-        let _ = c.call_method(Some(SERVICE), PATH, Some(IFACE), "unregister", &(ours.as_str(), "capture"));
-        let _ = c.call_method(Some(SERVICE), PATH, Some(IFACE), "unregister", &(LEGACY_COMPONENT, "capture"));
+        let _ = c.call_method(Some(SERVICE), PATH, Some(IFACE), "setForeignShortcut", &(portal_action(id), Vec::<i32>::new()));
+        for comp in [id.service_component(), LEGACY_COMPONENT.to_string()] { let _ = c.call_method(Some(SERVICE), PATH, Some(IFACE), "unregister", &(comp.as_str(), "capture")); }
         r.step("Print Screen no longer bound to LinkShot");
         Ok(())
     }
@@ -211,6 +219,7 @@ pub mod gnome {
 pub mod kde {
     pub fn holders_of_print() -> anyhow::Result<Vec<Holder>> { Ok(vec![]) }
     pub struct Holder { pub component: String }
+    pub fn is_default(_: &super::Identity) -> bool { false }
     pub fn make_default(_: &super::Identity, _: &mut super::Report) -> anyhow::Result<()> { anyhow::bail!("not KDE") }
     pub fn undo(_: &super::Identity, _: &mut super::Report) -> anyhow::Result<()> { Ok(()) }
 }

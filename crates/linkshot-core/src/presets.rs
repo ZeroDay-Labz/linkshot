@@ -233,17 +233,41 @@ impl HotKey {
         if self.ctrl { parts.push("Ctrl".to_string()); }
         if self.alt { parts.push("Alt".to_string()); }
         if self.shift { parts.push("Shift".to_string()); }
-        if self.win { parts.push("Win".to_string()); }
-        parts.push(match self.key.as_str() {
-            "PrintScreen" | "Snapshot" => "Print Screen".to_string(),
-            "Oem2" | "OemQuestion" => "/".to_string(),
-            "Oem3" => "`".to_string(),
-            "OemMinus" => "-".to_string(),
-            "OemPlus" => "=".to_string(),
-            k if k.len() == 2 && k.starts_with('D') => k[1..].to_string(),
-            k => k.to_string(),
-        });
+        if self.win { parts.push(if cfg!(windows) { "Win" } else { "Super" }.to_string()); }
+        parts.push(key_label(&self.key));
         parts.join("+")
+    }
+}
+
+/// What a stored key name (Windows virtual-key spelling, kept for file compatibility) looks like to
+/// a person: `Oem1` → `;`, `D5` → `5`, `Prior` → `Page Up`.
+pub fn key_label(key: &str) -> String {
+    match key {
+        "PrintScreen" | "Snapshot" => "Print Screen".into(),
+        "Oem1" | "OemSemicolon" => ";".into(),
+        "Oem2" | "OemQuestion" => "/".into(),
+        "Oem3" | "OemTilde" => "`".into(),
+        "Oem4" | "OemOpenBrackets" => "[".into(),
+        "Oem5" | "OemPipe" => "\\".into(),
+        "Oem6" | "OemCloseBrackets" => "]".into(),
+        "Oem7" | "OemQuotes" => "'".into(),
+        "OemMinus" => "-".into(),
+        "OemPlus" => "=".into(),
+        "OemComma" => ",".into(),
+        "OemPeriod" => ".".into(),
+        "Prior" | "PageUp" => "Page Up".into(),
+        "Next" | "PageDown" => "Page Down".into(),
+        "Back" => "Backspace".into(),
+        "Return" | "Enter" => "Enter".into(),
+        "Escape" => "Esc".into(),
+        "Scroll" => "Scroll Lock".into(),
+        "Pause" => "Pause".into(),
+        "Insert" => "Insert".into(),
+        "Delete" => "Delete".into(),
+        "Up" => "Up".into(), "Down" => "Down".into(), "Left" => "Left".into(), "Right" => "Right".into(),
+        k if k.len() == 2 && k.starts_with('D') && k.as_bytes()[1].is_ascii_digit() => k[1..].to_string(),
+        k if k.starts_with("NumPad") => format!("Num {}", &k[6..]),
+        k => k.to_string(),
     }
 }
 
@@ -578,5 +602,23 @@ mod tests {
         assert_eq!(sc.selection_mode, SelectionMode::SelectionModePanoramic);
         assert!(sc.hot_key.ctrl && sc.hot_key.alt && !sc.hot_key.shift);
         assert_eq!(sc.share_destination_ids, vec![output_ids::FILE.to_string()]);
+    }
+}
+
+#[cfg(test)]
+mod hotkey_label_tests {
+    use super::*;
+
+    #[test]
+    fn hotkeys_read_like_keyboard_labels() {
+        let hk = |key: &str, ctrl: bool, shift: bool| HotKey { key: key.into(), ctrl, shift, ..Default::default() };
+        assert_eq!(hk("Oem1", true, false).display(), "Ctrl+;");
+        assert_eq!(hk("Oem7", true, false).display(), "Ctrl+'");
+        assert_eq!(hk("Oem2", true, true).display(), "Ctrl+Shift+/");
+        assert_eq!(hk("D5", true, false).display(), "Ctrl+5");
+        assert_eq!(hk("PrintScreen", false, false).display(), "Print Screen");
+        assert_eq!(hk("Prior", true, false).display(), "Ctrl+Page Up");
+        assert_eq!(hk("Oem5", true, false).display(), "Ctrl+\\");
+        assert!(!hk("OemComma", true, false).display().contains("Oem"));
     }
 }
