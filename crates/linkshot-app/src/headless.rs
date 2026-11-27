@@ -303,6 +303,18 @@ pub fn run_shots(dir: &std::path::Path, files: &[std::path::PathBuf], dark: bool
         let img = render_frame(&gctx, &mut renderer, gsize, 2.0, bg, |ctx| gt.ui(ctx, &pal));
         img.save(dir.join("grab_text_results.png"))?;
     }
+    // Update window states.
+    for which in ["available", "downloading", "installed"] {
+        let uctx = egui::Context::default();
+        crate::theme::apply(&uctx, &app.pal);
+        let mut up = crate::updates::Updater::default();
+        up.preview(which);
+        let pal = app.pal;
+        let size = egui::vec2(crate::updates::SIZE[0], crate::updates::SIZE[1]);
+        // The window is a child viewport in the app; here its contents are drawn in the root one.
+        for _ in 0..2 { let _ = render_frame(&uctx, &mut renderer, size, 2.0, bg, |ctx| { let _ = up.ui(ctx, &pal, None); }); }
+        render_frame(&uctx, &mut renderer, size, 2.0, bg, |ctx| { let _ = up.ui(ctx, &pal, None); }).save(dir.join(format!("update_{which}.png")))?;
+    }
     // Library view with a small synthetic library (thumbnails come from the worker thread).
     {
         let lib = dir.join("library");

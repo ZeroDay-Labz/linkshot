@@ -23,6 +23,8 @@ pub fn is_simplified_crosshair() -> bool { SIMPLIFIED_CROSSHAIR.load(Ordering::R
 #[derive(Clone, Debug)]
 pub enum Action {
     StartCapture(CaptureSettings),
+    /// Help ▸ Check for Updates.
+    CheckForUpdates,
     RepeatLastCapture,
     OpenEditor,
     HideCaptureWindow,
@@ -102,6 +104,8 @@ pub struct App {
     pub prefs_hotkey_editing: Option<String>,
     /// A combination a global shortcut delivered while a hotkey field was listening (see `poll_events`).
     pub pending_hotkey_input: Option<linkshot_core::presets::HotKey>,
+    /// "Check for Updates" window and worker.
+    pub updater: crate::updates::Updater,
     /// When the current capture was triggered (for the timing log).
     pub capture_t0: Option<Instant>,
     /// First-run question: make LinkShot the system's screenshot tool (Print Screen).
@@ -187,6 +191,7 @@ impl App {
             show_prefs: false,
             prefs_hotkey_editing: None,
             pending_hotkey_input: None,
+            updater: Default::default(),
             capture_t0: None,
             show_about: false,
             show_default_prompt: false,
@@ -215,6 +220,17 @@ impl App {
         #[cfg(target_os = "linux")]
         linkshot_capture::screencast::configure(linkshot_capture::screencast::Tokens { plain: app.settings.screencast_token.clone(), cursor: app.settings.screencast_token_cursor.clone() });
         // The desktop file (KWin authorisation, Print Screen action) is installed by `identify_to_desktop` in main.
+        if headless_dark.is_none() {
+            // What an earlier update left behind (downloaded packages, the old Windows executable).
+            std::thread::spawn(linkshot_platform::update::clean_up);
+            // Automatic update checks only when the user turned them on, at most once a day.
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
+            if app.settings.check_updates_on_start && now - app.settings.last_update_check > 24 * 3600 {
+                app.settings.last_update_check = now;
+                app.mark_settings_dirty();
+                app.check_for_updates(false);
+            }
+        }
         if headless_dark.is_none() && !background && !app.settings.default_tool_prompted && linkshot_platform::default_tool::supported() {
             app.show_default_prompt = true;
         }
@@ -252,6 +268,13 @@ impl App {
         self.settings.system_print_screen = false;
         self.mark_settings_dirty();
         self.register_hotkeys();
+    }
+
+    /// Looks for a newer release (see `updates.rs`). `manual`: the user asked.
+    pub fn check_for_updates(&mut self, manual: bool) {
+        let wake = self.wake();
+        let skipped = self.settings.skipped_update.clone();
+        self.updater.check(manual, &skipped, wake);
     }
 
     pub fn mark_presets_dirty(&mut self) { self.presets_dirty = true; }
@@ -358,6 +381,7 @@ impl App {
             Action::ToggleCaptureWindow => { if self.capture_visible { self.dispatch(ctx, Action::HideCaptureWindow) } else { self.dispatch(ctx, Action::ShowCaptureWindow) } }
             Action::ShowPreferences => { self.show_prefs = true; self.editor_visible = true; }
             Action::ShowAbout => self.show_about = true,
+            Action::CheckForUpdates => self.check_for_updates(true),
             Action::SetTheme(t) => {
                 self.settings.ui_theme = t;
                 self.mark_settings_dirty();
@@ -792,6 +816,7 @@ impl App {
                 TrayEvent::RepeatLast => self.dispatch(ctx, Action::RepeatLastCapture),
                 TrayEvent::Preferences => self.dispatch(ctx, Action::ShowPreferences),
                 TrayEvent::Help => { let _ = linkshot_platform::open_url("https://github.com/ZeroDay-Labz/linkshot#readme"); }
+                TrayEvent::CheckForUpdates => self.check_for_updates(true),
                 TrayEvent::Exit => self.dispatch(ctx, Action::Quit),
             }
         }
@@ -967,6 +992,20 @@ impl eframe::App for App {
                         ctx.request_repaint_after(Duration::from_millis(200));
                     });
                 }
+            }
+        }
+
+        // Update window (bottom-right of the primary monitor).
+        if self.updater.visible() {
+            let pal = self.pal;
+            let pos = linkshot_capture::monitors().ok().and_then(|ms| ms.iter().find(|m| m.is_primary).or(ms.first()).map(|m| [m.x as f32 + m.width as f32 - crate::updates::SIZE[0] - 24.0, m.y as f32 + m.height as f32 - crate::updates::SIZE[1] - 72.0]));
+            match self.updater.ui(ctx, &pal, pos) {
+                Some(crate::updates::Request::Skip(tag)) => { self.settings.skipped_update = tag; self.mark_settings_dirty(); }
+                Some(crate::updates::Request::Restart(kind)) => match linkshot_platform::update::relaunch(kind) {
+                    Ok(()) => { self.persist(true); self.dispatch(ctx, Action::Quit); }
+                    Err(e) => self.set_status(format!("Restart LinkShot to finish the update ({e:#})")),
+                },
+                None => {}
             }
         }
 

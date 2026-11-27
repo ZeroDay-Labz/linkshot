@@ -126,6 +126,7 @@ impl App {
                             ui.style_mut().visuals.override_text_color = Some(pal.text);
                             if ui.button("Tutorials").clicked() { let _ = linkshot_platform::open_url("https://github.com/ZeroDay-Labz/linkshot#readme"); ui.close(); }
                             if ui.button("Support").clicked() { let _ = linkshot_platform::open_url("https://github.com/ZeroDay-Labz/linkshot/issues"); ui.close(); }
+                            if ui.button("Check for Updates…").clicked() { actions.push(Action::CheckForUpdates); ui.close(); }
                             ui.separator();
                             if ui.button("About LinkShot").clicked() { actions.push(Action::ShowAbout); ui.close(); }
                         });

@@ -24,6 +24,7 @@ bundled-tools = ["linkshot-tools/embedded"]
 embed-resource = "3"
 
 [dependencies]
+semver = "1"
 linkshot-core.workspace = true
 linkshot-render.workspace = true
 linkshot-capture.workspace = true

@@ -73,6 +73,13 @@ pub struct Settings {
     /// Print Screen is bound to LinkShot by the desktop itself (see `linkshot_platform::default_tool`), so the
     /// in-app hotkey must not claim it too.
     pub system_print_screen: bool,
+    /// Look for a new release on GitHub when LinkShot starts (at most once a day). Off by default:
+    /// otherwise LinkShot only checks when the user picks *Check for Updates*.
+    pub check_updates_on_start: bool,
+    /// Unix time of the last automatic update check.
+    pub last_update_check: i64,
+    /// A release the user chose to skip ("v0.6.0"); automatic checks do not offer it again.
+    pub skipped_update: String,
     pub capture_interface: CaptureInterface,
     pub auto_check_updates: bool,
     pub show_onboarding: bool,
@@ -187,6 +194,9 @@ impl Default for Settings {
             run_at_startup: false,
             default_tool_prompted: false,
             system_print_screen: false,
+            check_updates_on_start: false,
+            last_update_check: 0,
+            skipped_update: String::new(),
             ui_scale: 1.0,
             capture_interface: CaptureInterface::CaptureWindow,
             auto_check_updates: false,

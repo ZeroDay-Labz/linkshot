@@ -51,6 +51,7 @@ mod share;
 mod single_instance;
 mod theme;
 mod tray_icon;
+mod updates;
 mod widgets;
 
 fn main() -> eframe::Result<()> {

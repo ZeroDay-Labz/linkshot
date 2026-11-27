@@ -15,6 +15,7 @@ pub enum TrayEvent {
     Preferences,
     Exit,
     Help,
+    CheckForUpdates,
     /// Left click on the icon: bring the Capture window to the front.
     IconClicked,
     /// Middle click on the icon: capture with the selected preset.
@@ -107,6 +108,7 @@ mod platform {
                 MenuItem::Separator,
                 Self::item("Preferences...", TrayEvent::Preferences),
                 Self::item("Help", TrayEvent::Help),
+                Self::item("Check for Updates…", TrayEvent::CheckForUpdates),
                 MenuItem::Separator,
                 Self::item("Exit LinkShot", TrayEvent::Exit),
             ]
@@ -146,11 +148,12 @@ mod platform {
             let widget = MenuItem::new("Repeat Last Capture", true, None);
             let prefs = MenuItem::new("Preferences...", true, None);
             let help = MenuItem::new("Help", true, None);
+            let updates = MenuItem::new("Check for Updates…", true, None);
             let exit = MenuItem::new("Exit LinkShot", true, None);
-            let _ = menu.append_items(&[&open_editor, &open_capture, &capture, &widget, &PredefinedMenuItem::separator(), &prefs, &help, &PredefinedMenuItem::separator(), &exit]);
+            let _ = menu.append_items(&[&open_editor, &open_capture, &capture, &widget, &PredefinedMenuItem::separator(), &prefs, &help, &updates, &PredefinedMenuItem::separator(), &exit]);
             let tray = tray_icon::TrayIconBuilder::new().with_menu(Box::new(menu)).with_tooltip("LinkShot").with_icon(icon).build();
             let _tray = match tray { Ok(t) => t, Err(e) => { tracing::warn!("tray icon failed: {e}"); return; } };
-            let ids = [(open_editor.id().clone(), TrayEvent::OpenEditor), (open_capture.id().clone(), TrayEvent::OpenCaptureWindow), (capture.id().clone(), TrayEvent::Capture), (widget.id().clone(), TrayEvent::RepeatLast), (prefs.id().clone(), TrayEvent::Preferences), (help.id().clone(), TrayEvent::Help), (exit.id().clone(), TrayEvent::Exit)];
+            let ids = [(open_editor.id().clone(), TrayEvent::OpenEditor), (open_capture.id().clone(), TrayEvent::OpenCaptureWindow), (capture.id().clone(), TrayEvent::Capture), (widget.id().clone(), TrayEvent::RepeatLast), (prefs.id().clone(), TrayEvent::Preferences), (help.id().clone(), TrayEvent::Help), (updates.id().clone(), TrayEvent::CheckForUpdates), (exit.id().clone(), TrayEvent::Exit)];
             let menu_rx = MenuEvent::receiver();
             let icon_rx = tray_icon::TrayIconEvent::receiver();
             loop {

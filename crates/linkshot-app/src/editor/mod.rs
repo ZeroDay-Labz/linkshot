@@ -862,6 +862,7 @@ fn editor_menu(app: &mut App, ui: &mut egui::Ui, ctx: &egui::Context, actions: &
     });
     ui.menu_button("Help", |ui| {
         if ui.button("Tutorials").clicked() { let _ = linkshot_platform::open_url("https://github.com/ZeroDay-Labz/linkshot#readme"); ui.close(); }
+        if ui.button("Check for Updates…").clicked() { app.check_for_updates(true); ui.close(); }
         ui.separator();
         if ui.button("About LinkShot").clicked() { app.show_about = true; ui.close(); }
     });
@@ -1322,6 +1323,7 @@ fn preferences_window(app: &mut App, ctx: &egui::Context, _actions: &mut Vec<Act
             changed |= ui.checkbox(&mut s.simplified_crosshairs, "Simplified crosshairs").changed();
             changed |= ui.checkbox(&mut s.freeze_screen_during_capture, "Freeze the screen during capture (captures menus and tooltips as they were; otherwise the crosshairs are drawn over the live screen)").changed();
             changed |= ui.checkbox(&mut s.run_at_startup, "Run LinkShot when the system starts").changed();
+            changed |= ui.checkbox(&mut s.check_updates_on_start, "Check for updates when LinkShot starts (once a day, from GitHub)").changed();
             ui.label(egui::RichText::new("Hotkeys").strong());
             ui.label(egui::RichText::new(format!("Capture: {} (set it under the Capture button)", app.presets.global_hot_key.display())).small());
             let mut delivered = app.pending_hotkey_input.take();
