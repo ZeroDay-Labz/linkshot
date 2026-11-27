@@ -228,7 +228,10 @@ mod portal {
             let stop = Arc::new(Stop::default());
             self.stop = Some(stop.clone());
             let error = self.error.clone();
-            let bindings: Vec<(String, String, String, HotkeyEvent)> = bindings.iter().filter(|(hk, _)| !hk.is_none()).enumerate().map(|(i, (hk, ev))| {
+            // Shortcut ids must stay the same when other bindings change (the desktop keeps the user's
+            // key per id), so presets use their own id only, made unique if two ever collide.
+            let mut used = std::collections::HashSet::new();
+            let bindings: Vec<(String, String, String, HotkeyEvent)> = bindings.iter().filter(|(hk, _)| !hk.is_none()).map(|(hk, ev)| {
                 let (id, desc) = match ev {
                     HotkeyEvent::GlobalCapture => ("capture".to_string(), "Capture".to_string()),
                     HotkeyEvent::ShowHide => ("show-hide".to_string(), "Show/hide linkshot".to_string()),
@@ -237,8 +240,11 @@ mod portal {
                     HotkeyEvent::VideoStop => ("video-stop".to_string(), "Video stop".to_string()),
                     HotkeyEvent::DrawMode => ("draw-mode".to_string(), "Enter/exit draw mode".to_string()),
                     HotkeyEvent::MuteMic => ("mute-mic".to_string(), "Mute/unmute the microphone".to_string()),
-                    HotkeyEvent::Preset(p) => (format!("preset-{i}-{}", p.chars().filter(|c| c.is_ascii_alphanumeric()).collect::<String>()), "Capture with preset".to_string()),
+                    HotkeyEvent::Preset(p) => (format!("preset-{}", p.chars().filter(|c| c.is_ascii_alphanumeric()).collect::<String>()), "Capture with preset".to_string()),
                 };
+                let mut id = id;
+                let mut n = 2;
+                while !used.insert(id.clone()) { id = format!("{id}-{n}"); n += 1; }
                 (id, desc, trigger(hk), ev.clone())
             }).collect();
             if bindings.is_empty() { *error.lock() = None; return; }

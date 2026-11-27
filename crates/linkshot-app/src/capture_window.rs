@@ -228,6 +228,17 @@ impl App {
                 });
             }
         });
+        // Messages for the user (import results, failed captures) also show here, not only in the Editor.
+        if let Some((msg, t)) = self.status.as_ref().filter(|(_, t)| t.elapsed().as_secs_f32() < 5.0) {
+            let left = 5.0 - t.elapsed().as_secs_f32();
+            egui::Area::new(egui::Id::new("capture-status")).order(egui::Order::Foreground).anchor(Align2::CENTER_BOTTOM, [0.0, -10.0]).interactable(false).show(ctx, |ui| {
+                egui::Frame::new().fill(pal.dark_panel).stroke(Stroke::new(1.0_f32, pal.control_outline)).corner_radius(6.0).inner_margin(egui::Margin::symmetric(12, 6)).show(ui, |ui| {
+                    ui.set_max_width(wanted.x - 60.0);
+                    ui.label(egui::RichText::new(msg).color(pal.text_bright).size(12.0));
+                });
+            });
+            ctx.request_repaint_after(std::time::Duration::from_secs_f32(left.max(0.05)));
+        }
         for a in actions { self.dispatch(ctx, a); }
     }
 

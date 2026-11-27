@@ -202,8 +202,12 @@ impl EditorState {
     pub fn persist(&mut self, paths: &Paths) {
         if !self.tray_dirty { return; }
         let items: Vec<TrayEntry> = self.docs.iter().filter_map(|d| d.doc.path.clone().map(|p| TrayEntry { path: p, pinned: d.pinned })).collect();
-        let _ = std::fs::write(paths.tray_file(), serde_json::to_vec(&TrayFile { items }).unwrap_or_default());
-        self.tray_dirty = false;
+        // Never replace the tray file with an empty one because serialising failed.
+        let res = serde_json::to_vec(&TrayFile { items }).map_err(anyhow::Error::from).and_then(|b| linkshot_core::settings::write_atomic(&paths.tray_file(), &b));
+        match res {
+            Ok(()) => self.tray_dirty = false,
+            Err(e) => { tracing::warn!("could not save the tray: {e:#}"); self.set_status(format!("Could not save the tray list: {e:#}")); self.tray_dirty = false; }
+        }
     }
 
     /// Wraps a document for the tray; GIF/MP4 posters (see `share::open_file`) become video documents.

@@ -121,7 +121,19 @@ pub struct App {
     /// Preset being edited in place through the tab (Edit in the preset menu).
     pub editing_preset: Option<String>,
     pub status: Option<(String, Instant)>,
-    interval_timer: Option<(CaptureSettings, Instant, Option<image::RgbaImage>)>,
+    interval_timer: Option<IntervalTimer>,
+    /// A full-screen grab running on a worker thread (delayed and frozen-screen captures), so the
+    /// UI keeps drawing while the compositor or portal answers.
+    snapshot_job: Option<(CaptureSettings, crossbeam_channel::Receiver<anyhow::Result<linkshot_capture::Snapshot>>)>,
+}
+
+/// Interval capture: the grab and the "identical to the last one?" check run on a worker thread.
+struct IntervalTimer {
+    settings: CaptureSettings,
+    last: Instant,
+    prev: Option<std::sync::Arc<image::RgbaImage>>,
+    job: Option<crossbeam_channel::Receiver<anyhow::Result<Option<(std::sync::Arc<image::RgbaImage>, bool)>>>>,
+    first: bool,
 }
 
 impl App {
@@ -204,6 +216,7 @@ impl App {
             editing_preset: None,
             status: None,
             interval_timer: None,
+            snapshot_job: None,
         };
         // Print Screen was handed to LinkShot earlier, but the binding is gone or points elsewhere (a
         // reinstall, a switch between the Flatpak and the package, the desktop file being renamed, a
@@ -459,24 +472,31 @@ impl App {
             Action::ExportPreset(id) => {
                 if let Some(p) = self.presets.presets.iter().find(|p| p.id == id).cloned() {
                     if let Some(path) = rfd::FileDialog::new().set_file_name(format!("{}.json", linkshot_core::naming::sanitize(&p.effective_name()))).add_filter("linkshot preset", &["json"]).save_file() {
-                        if let Err(e) = std::fs::write(&path, serde_json::to_string_pretty(&vec![p]).unwrap_or_default()) { self.set_status(format!("Export failed: {e}")); } else { self.set_status("Preset exported."); }
+                        let res = serde_json::to_string_pretty(&vec![p]).map_err(anyhow::Error::from).and_then(|j| std::fs::write(&path, j).map_err(anyhow::Error::from));
+                        match res { Ok(()) => self.set_status("Preset exported."), Err(e) => { tracing::warn!("preset export: {e:#}"); self.set_status(format!("Export failed: {e:#}")); } }
                     }
                 }
             }
             Action::ExportPresets => {
                 if let Some(path) = rfd::FileDialog::new().set_file_name("presets.json").add_filter("linkshot presets", &["json"]).save_file() {
-                    let _ = std::fs::write(&path, serde_json::to_string_pretty(&self.presets.presets).unwrap_or_default());
-                    self.set_status("Presets exported.");
+                    let res = serde_json::to_string_pretty(&self.presets.presets).map_err(anyhow::Error::from).and_then(|j| std::fs::write(&path, j).map_err(anyhow::Error::from));
+                    match res { Ok(()) => self.set_status(format!("Exported {} presets.", self.presets.presets.len())), Err(e) => { tracing::warn!("presets export: {e:#}"); self.set_status(format!("Export failed: {e:#}")); } }
                 }
             }
             Action::ImportPresets => {
                 if let Some(path) = rfd::FileDialog::new().add_filter("Presets", &["snagpresets", "xml", "json"]).pick_file() {
                     match std::fs::read(&path) {
                         Ok(bytes) => {
-                            let imported: Vec<CaptureSettings> = if path.extension().map(|e| e == "json").unwrap_or(false) {
-                                serde_json::from_slice(&bytes).unwrap_or_default()
+                            let parsed: anyhow::Result<Vec<CaptureSettings>> = if path.extension().map(|e| e == "json").unwrap_or(false) {
+                                // A single exported preset is an array too, but accept a bare object.
+                                serde_json::from_slice::<Vec<CaptureSettings>>(&bytes).or_else(|e| serde_json::from_slice::<CaptureSettings>(&bytes).map(|p| vec![p]).map_err(|_| e)).map_err(anyhow::Error::from)
                             } else {
-                                SavedPresets::import_linkshot_xml(&bytes).unwrap_or_default().into_iter().filter(|p| !p.id.starts_with('{') || p.id.contains("Def")).collect()
+                                SavedPresets::import_linkshot_xml(&bytes).map(|v| v.into_iter().filter(|p| !p.id.starts_with('{') || p.id.contains("Def")).collect())
+                            };
+                            let imported = match parsed {
+                                Ok(v) if v.is_empty() => { self.set_status(format!("{} contains no presets.", path.display())); return; }
+                                Ok(v) => v,
+                                Err(e) => { tracing::warn!("preset import {}: {e:#}", path.display()); self.set_status(format!("Could not read presets from {}: {e:#}", path.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default())); return; }
                             };
                             let n = imported.len();
                             for mut p in imported { if self.presets.presets.iter().any(|x| x.id == p.id) { p.id = uuid::Uuid::new_v4().to_string(); } self.presets.presets.push(p); }
@@ -501,7 +521,7 @@ impl App {
         if settings.time_delay && settings.timed_capture_type == TimedCaptureType::Interval {
             if self.interval_timer.is_some() { self.interval_timer = None; self.capture_toggled = false; self.set_status("Interval capture stopped."); return; }
             self.capture_toggled = true;
-            self.interval_timer = Some((settings, Instant::now(), None));
+            self.interval_timer = Some(IntervalTimer { settings, last: Instant::now(), prev: None, job: None, first: true });
             self.set_status("Interval capture started.");
             return;
         }
@@ -510,7 +530,7 @@ impl App {
             self.pending = None; self.capture_toggled = false; self.set_status("Scheduled capture cancelled."); return;
         }
         // One capture at a time: a second trigger while the overlay is up would snapshot the overlay itself.
-        if self.overlay.is_some() || self.pending.is_some() || self.scrolling.is_some() || self.recording.is_some() {
+        if self.overlay.is_some() || self.pending.is_some() || self.snapshot_job.is_some() || self.scrolling.is_some() || self.recording.is_some() {
             self.set_status("A capture is already in progress.");
             return;
         }
@@ -577,8 +597,26 @@ impl App {
         let t_probe = Instant::now();
         let backend = if interactive && !self.settings.freeze_screen_during_capture { linkshot_capture::live::probe() } else { None };
         let t_layout = Instant::now();
-        let grabbed = match backend { Some(_) => linkshot_capture::layout(), None => linkshot_capture::snapshot_with_cursor(settings.capture_cursor) };
+        if backend.is_none() && matches!(settings.selection_mode, SelectionMode::SelectionModeClipboard | SelectionMode::SelectionModeFile) {
+            // No screen content needed.
+            return self.handle_grab(ctx, settings, None, linkshot_capture::layout());
+        }
+        if backend.is_none() {
+            // A full screenshot: on a worker, the UI keeps running meanwhile.
+            let (tx, rx) = crossbeam_channel::bounded(1);
+            let cursor = settings.capture_cursor;
+            let wake = self.wake();
+            std::thread::Builder::new().name("snapshot".into()).spawn(move || { let _ = tx.send(linkshot_capture::snapshot_with_cursor(cursor)); wake(); }).ok();
+            self.snapshot_job = Some((settings, rx));
+            return;
+        }
+        let grabbed = linkshot_capture::layout();
         tracing::info!("capture timing: since trigger {} ms, probe {} ms ({backend:?}), layout {} ms", self.capture_t0.map(|t| t.elapsed().as_millis()).unwrap_or(0), (t_layout - t_probe).as_millis(), t_layout.elapsed().as_millis());
+        self.handle_grab(ctx, settings, backend, grabbed);
+    }
+
+    /// Finishes a capture once the screen (or its layout, for live overlays) is known.
+    fn handle_grab(&mut self, ctx: &egui::Context, settings: CaptureSettings, backend: Option<linkshot_capture::live::Backend>, grabbed: anyhow::Result<linkshot_capture::Snapshot>) {
         match grabbed {
             Err(e) => { self.set_status(format!("Capture failed: {e:#}")); self.restore_windows(ctx); }
             Ok(snap) => {
@@ -838,32 +876,56 @@ impl App {
                 crate::single_instance::Request::Ping => {}
             }
         }
-        // Interval capture tick.
-        if let Some((settings, last, prev)) = self.interval_timer.as_mut() {
-            let secs = match settings.interval_units { IntervalUnits::Seconds => 1, IntervalUnits::Minutes => 60, IntervalUnits::Hours => 3600 } * settings.interval_duration.max(1) as u64;
-            if last.elapsed() >= Duration::from_secs(secs) {
-                *last = Instant::now();
-                let settings = settings.clone();
-                let discard = settings.interval_discard_identical;
-                if let Ok(snap) = linkshot_capture::snapshot_with_cursor(settings.capture_cursor) {
-                    let idx = snap.monitors.iter().position(|m| m.is_primary).unwrap_or(0);
-                    let img = match settings.selection_mode {
-                        SelectionMode::SelectionModeRegion if settings.selection_settings_region.region_selection_type == RegionSelectionType::RegionSelectionFixed => snap.crop(settings.selection_settings_region.rect()),
-                        _ => Some(snap.images[idx].clone()),
-                    };
-                    if let Some(img) = img {
-                        let identical = discard && prev.as_ref().map(|p| linkshot_capture::images_identical(p, &img)).unwrap_or(false);
-                        let first = prev.is_none();
-                        *prev = Some(img.clone());
-                        if !identical {
-                            self.finish_capture(ctx, img, None, &settings);
-                            // Later ticks must not keep yanking the Editor to the front.
-                            if !first { self.editor.focus_requested = false; }
-                        }
-                    }
-                }
+        // A full-screen grab finished on its worker.
+        if let Some((_, rx)) = self.snapshot_job.as_ref() {
+            if let Ok(res) = rx.try_recv() {
+                let (settings, _) = self.snapshot_job.take().unwrap();
+                tracing::info!("capture timing: since trigger {} ms (screenshot)", self.capture_t0.map(|t| t.elapsed().as_millis()).unwrap_or(0));
+                self.handle_grab(ctx, settings, None, res);
+            }
+        }
+        // Interval capture tick: start a grab when due, collect it when done.
+        let mut interval_result = None;
+        let wake = if self.interval_timer.is_some() { self.wake() } else { std::sync::Arc::new(|| {}) };
+        if let Some(it) = self.interval_timer.as_mut() {
+            let secs = match it.settings.interval_units { IntervalUnits::Seconds => 1, IntervalUnits::Minutes => 60, IntervalUnits::Hours => 3600 } * it.settings.interval_duration.max(1) as u64;
+            if it.job.is_none() && it.last.elapsed() >= Duration::from_secs(secs) {
+                it.last = Instant::now();
+                let (tx, rx) = crossbeam_channel::bounded(1);
+                let (settings, prev, wake) = (it.settings.clone(), it.prev.clone(), wake.clone());
+                std::thread::Builder::new().name("interval-capture".into()).spawn(move || {
+                    let res = linkshot_capture::snapshot_with_cursor(settings.capture_cursor).map(|snap| {
+                        let idx = snap.monitors.iter().position(|m| m.is_primary).unwrap_or(0);
+                        let img = match settings.selection_mode {
+                            SelectionMode::SelectionModeRegion if settings.selection_settings_region.region_selection_type == RegionSelectionType::RegionSelectionFixed => snap.crop(settings.selection_settings_region.rect()),
+                            _ => Some(snap.images[idx].clone()),
+                        };
+                        img.map(|img| {
+                            let identical = settings.interval_discard_identical && prev.as_ref().map(|p| linkshot_capture::images_identical(p, &img)).unwrap_or(false);
+                            (std::sync::Arc::new(img), identical)
+                        })
+                    });
+                    let _ = tx.send(res);
+                    wake();
+                }).ok();
+                it.job = Some(rx);
+            }
+            if let Some(res) = it.job.as_ref().and_then(|rx| rx.try_recv().ok()) {
+                it.job = None;
+                interval_result = Some((res, it.settings.clone(), it.first));
+                if let Ok(Some((img, _))) = &interval_result.as_ref().unwrap().0 { it.prev = Some(img.clone()); it.first = false; }
             }
             crate::keepalive::wake_after(ctx, Duration::from_millis(250));
+        }
+        match interval_result {
+            Some((Ok(Some((img, false))), settings, first)) => {
+                self.finish_capture(ctx, (*img).clone(), None, &settings);
+                // Later ticks must not keep yanking the Editor to the front.
+                if !first { self.editor.focus_requested = false; }
+            }
+            Some((Ok(None), _, _)) => self.set_status("Interval capture: the fixed region is off-screen."),
+            Some((Err(e), _, _)) => { tracing::warn!("interval capture: {e:#}"); self.set_status(format!("Interval capture failed: {e:#}")); }
+            _ => {}
         }
     }
 }
@@ -1121,7 +1183,7 @@ impl eframe::App for App {
             for a in actions { self.dispatch(ctx, a); }
             if close {
                 self.editor_visible = false;
-                let busy = self.overlay.is_some() || self.pending.is_some() || self.scrolling.is_some() || self.recording.is_some() || self.interval_timer.is_some();
+                let busy = self.overlay.is_some() || self.pending.is_some() || self.snapshot_job.is_some() || self.scrolling.is_some() || self.recording.is_some() || self.interval_timer.is_some();
                 if !self.capture_visible && !busy && (self.capture_was_visible || !self.tray.available) { self.dispatch(ctx, Action::ShowCaptureWindow); }
             }
         }
