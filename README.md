@@ -5,7 +5,7 @@
 <h1 align="center">LinkShot</h1>
 
 <p align="center">
-  The free, open-source <b>Snagit alternative for Linux and Windows</b>: screenshots, scrolling capture,
+  The free, open-source <b>all-in-one capture tool for Linux and Windows</b>: screenshots, scrolling capture,
   screen recording with audio and webcam, OCR text grab and a vector image editor in one app.
   Press Print Screen, pick a region, done.
 </p>
@@ -39,7 +39,7 @@ Releases are on the [Releases](https://github.com/ZeroDay-Labz/linkshot/releases
 ## Why LinkShot
 
 Linux has good screenshot tools (Spectacle, Flameshot, Ksnip, GNOME Screenshot) and good screen recorders
-(OBS Studio, Kooha, Peek, SimpleScreenRecorder), but nothing that does what Snagit, ShareX or Greenshot do
+(OBS Studio, Kooha, Peek, SimpleScreenRecorder), but nothing that does what the commercial capture suites, ShareX or Greenshot do
 on Windows in one place. LinkShot is that tool, on Linux (KDE Plasma, GNOME and other Wayland or X11
 desktops) and on Windows:
 
@@ -53,7 +53,7 @@ desktops) and on Windows:
 * **Image editor** with arrows, callouts, shapes, text, steps, stamps, highlights, blur, magnify, crop,
   cut out (remove a band and join the rest with a torn, wave or seamless seam), effects, quick styles
   and undo, where annotations stay editable objects. Captures are saved as `.snagx`
-  (the same container layout Snagit uses, so a Snagit library opens in LinkShot) or exported as PNG, JPG,
+  (an open zip container with JSON pages, so existing `.snagx` libraries open in LinkShot) or exported as PNG, JPG,
   GIF, WebP, TIFF, BMP and ICO.
 * **Share** to file, clipboard, email, printer or any program, with presets, hotkeys and a tray icon.
 

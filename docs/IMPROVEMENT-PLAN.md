@@ -170,5 +170,5 @@ Still open:
 - GPU: egui draws the UI, the live overlay and the drag previews on the GPU already; the document
   rasteriser (tiny-skia) stays on the CPU for exact export. A wgpu rasteriser would be a rewrite with no
   user-visible gain now that drags no longer rasterise; not planned.
-- Still missing from Snagit: Simplify, Magic Wand, Smart Move, templates / Combine, Edit Points for
+- Still missing: Simplify, Magic Wand, Smart Move, templates / Combine, Edit Points for
   polygons and beziers, Selection ellipse / lasso, rotation handles, cloud share destinations.

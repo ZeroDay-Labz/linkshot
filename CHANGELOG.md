@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.1 — 2026-11-27
+
+- **About LinkShot** (Help menu, tray) is now a proper window: version, license (MIT or Apache-2.0),
+  links to the project, release notes and the issue tracker, the third-party software LinkShot ships
+  with their licenses, and a system summary (version, install type, OS, desktop, capture backend,
+  renderer and GPU) with a Copy System Info button for bug reports.
+- Check for Updates… is reachable from the About window.
+
 ## 0.6.0 — 2026-11-27
 
 - **Check for Updates.** Help ▸ Check for Updates… (Capture window, Editor and tray menu) looks for

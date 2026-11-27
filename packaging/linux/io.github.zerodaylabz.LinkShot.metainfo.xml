@@ -15,7 +15,7 @@
     GIF, WebP, TIFF, BMP, ICO and MP4. Print Screen can start a capture system-wide, and scrolling captures
     stitch whole pages pixel-exactly even with sticky headers.</p>
     <p>Everything needed is included: video export and text recognition work out of the box. LinkShot is a
-    free, open-source alternative to Snagit, Flameshot, Spectacle, ShareX and Greenshot for KDE Plasma,
+    free, open-source alternative to commercial capture suites, Flameshot, Spectacle, ShareX and Greenshot for KDE Plasma,
     GNOME and other Wayland or X11 desktops, and for Windows.</p>
   </description>
   <keywords>
@@ -31,7 +31,6 @@
     <keyword>annotate</keyword>
     <keyword>image editor</keyword>
     <keyword>webcam</keyword>
-    <keyword>Snagit</keyword>
     <keyword>Flameshot</keyword>
     <keyword>ShareX</keyword>
     <keyword>Print Screen</keyword>
@@ -43,6 +42,7 @@
   <categories><category>Graphics</category><category>Utility</category></categories>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.6.1" date="2026-11-27"/>
     <release version="0.6.0" date="2026-11-27"/>
     <release version="0.5.3" date="2026-11-27"/>
     <release version="0.5.2" date="2026-11-27"/>
