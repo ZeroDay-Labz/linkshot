@@ -116,6 +116,11 @@ jobs:
       - name: Version
         id: v
         run: echo "version=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')" >> "$GITHUB_OUTPUT"
+      # The runtimes preinstalled in the image live in a read-only overlay layer; updating them makes
+      # ostree rename directories across layers, which overlayfs refuses ("Invalid cross-device
+      # link"). Copying the installation into the writable layer first avoids that.
+      - name: Make the Flatpak installation writable
+        run: cp -a /var/lib/flatpak /var/lib/flatpak.rw && rm -rf /var/lib/flatpak && mv /var/lib/flatpak.rw /var/lib/flatpak
       - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
           manifest-path: packaging/flatpak/io.github.zerodaylabz.LinkShot.yml
