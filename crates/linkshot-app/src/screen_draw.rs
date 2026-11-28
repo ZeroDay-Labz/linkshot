@@ -37,17 +37,21 @@ pub struct ScreenDraw {
     placed: bool,
     passthrough_sent: Option<bool>,
     focus_pending: bool,
+    /// When draw mode was last switched on: the frame and the key hint show for a moment only,
+    /// since the recorder captures this layer (the drawings are meant to be in the video, the hint not).
+    activated_at: Instant,
 }
 
 impl ScreenDraw {
     pub fn new(region: LRect, fade_secs: u32, active: bool) -> Self {
-        Self { region, active, tool: Tool::Arrow, fade: Duration::from_secs(fade_secs.clamp(1, 60) as u64), color_index: 0, items: vec![], step_n: 0, drag: None, placed: false, passthrough_sent: None, focus_pending: active }
+        Self { region, active, tool: Tool::Arrow, fade: Duration::from_secs(fade_secs.clamp(1, 60) as u64), color_index: 0, items: vec![], step_n: 0, drag: None, placed: false, passthrough_sent: None, focus_pending: active, activated_at: Instant::now() }
     }
 
     pub fn toggle(&mut self) { self.set_active(!self.active); }
 
     pub fn set_active(&mut self, on: bool) {
         if self.active == on { return; }
+        if on && !self.active { self.activated_at = Instant::now(); }
         self.active = on;
         self.drag = None;
         if on { self.focus_pending = true; }
@@ -124,13 +128,16 @@ impl ScreenDraw {
                         if self.tool == Tool::Step { self.step_n += 1; self.items.push(Item { kind: Kind::Step(p, self.step_n), created: Instant::now(), color }); }
                     }
                 }
-                // Thin tinted frame so the user sees where drawing is possible, plus a hint.
-                painter.rect_stroke(view.shrink(1.0), 0.0, Stroke::new(2.0_f32, color.gamma_multiply(0.7)), egui::StrokeKind::Inside);
+                // Thin tinted frame so the user sees where drawing is possible, plus a hint, for the
+                // first few seconds of draw mode; they would otherwise be recorded into the video.
+                let shown = self.activated_at.elapsed() < Duration::from_millis(2500);
+                if shown { ctx.request_repaint_after(Duration::from_millis(2600).saturating_sub(self.activated_at.elapsed())); }
+                if shown { painter.rect_stroke(view.shrink(1.0), 0.0, Stroke::new(2.0_f32, color.gamma_multiply(0.7)), egui::StrokeKind::Inside);
                 let tool = match self.tool { Tool::Arrow => "Arrow", Tool::Square => "Square", Tool::Step => "Step" };
                 let hint = format!("Screen Draw: {tool}  •  A arrow  •  S square  •  1 steps  •  C colour  •  Esc done");
                 let hint_r = Rect::from_center_size(Pos2::new(view.center().x, view.top() + 22.0), Vec2::new(430.0_f32.min(view.width() - 8.0), 26.0));
                 painter.rect_filled(hint_r, 13.0, Color32::from_rgba_unmultiplied(0x17, 0x1B, 0x20, 225));
-                painter.text(hint_r.center(), Align2::CENTER_CENTER, hint, FontId::proportional(12.0), pal.text_bright);
+                painter.text(hint_r.center(), Align2::CENTER_CENTER, hint, FontId::proportional(12.0), pal.text_bright); }
                 if let Some((p0, p1)) = self.drag {
                     match self.tool { Tool::Square => draw_square(&painter, Rect::from_two_pos(p0, p1), color), _ => draw_arrow(&painter, p0, p1, color) }
                 }

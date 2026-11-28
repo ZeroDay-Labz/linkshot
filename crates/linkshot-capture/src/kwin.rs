@@ -95,6 +95,9 @@ fn options(include_cursor: bool) -> HashMap<&'static str, Value<'static>> {
     o.insert("include-cursor", Value::from(include_cursor));
     o.insert("include-decoration", Value::from(true));
     o.insert("native-resolution", Value::from(true));
+    // LinkShot's own windows (About, Editor, …) are captured like any other; the ones that must not
+    // appear (overlay, toolbars) are hidden or transparent at that moment anyway.
+    o.insert("hide-caller-windows", Value::from(false));
     o
 }
 

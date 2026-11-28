@@ -143,6 +143,13 @@ impl Overlay {
     }
 
     pub fn ui(&mut self, ctx: &egui::Context, pal: &Palette, m: usize) {
+        // Test hook (nested-compositor tests): LINKSHOT_TEST_REGION="x,y,w,h" selects that region
+        // as soon as the overlay is up, as if the user had dragged it and chosen Image.
+        if self.result.is_none() && self.blank.is_none() {
+            if let Some(v) = std::env::var("LINKSHOT_TEST_REGION").ok().map(|s| s.split(',').filter_map(|n| n.trim().parse::<f64>().ok()).collect::<Vec<_>>()).filter(|v| v.len() == 4) {
+                self.finish(OverlayResult::Image { region: LRect::from_xywh(v[0], v[1], v[2], v[3]), cursor: None });
+            }
+        }
         self.frames += 1;
         if self.frames == 1 || self.frames == 4 { tracing::info!("capture timing: overlay frame {} at {} ms after it was built", self.frames, self.created.elapsed().as_millis()); }
         let m = if self.single_monitor.is_some() { self.resolve_single(ctx) } else { m.min(self.snapshot.monitors.len().saturating_sub(1)) };

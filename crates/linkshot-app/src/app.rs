@@ -210,7 +210,8 @@ impl App {
             updater: Default::default(),
             about: Default::default(),
             capture_t0: None,
-            show_about: false,
+            // Test hook: open About at start (nested-compositor tests).
+            show_about: std::env::var_os("LINKSHOT_OPEN_ABOUT").is_some(),
             show_default_prompt: false,
             live_capture: None,
             screen_size: linkshot_capture::monitors().ok().and_then(|ms| ms.iter().find(|m| m.is_primary).or(ms.first()).map(|m| (m.width as f32, m.height as f32))),
@@ -798,6 +799,8 @@ impl App {
 
     pub fn finish_capture(&mut self, ctx: &egui::Context, img: image::RgbaImage, cursor: Option<linkshot_core::Pt>, settings: &CaptureSettings) {
         let _ = cursor;
+        // Test hook: LINKSHOT_TEST_DUMP=file.png saves every capture as it came from the screen.
+        if let Some(p) = std::env::var_os("LINKSHOT_TEST_DUMP") { let _ = img.save(p); }
         if settings.selection_mode == SelectionMode::SelectionModeOcr {
             self.start_grab_text(img);
             return;

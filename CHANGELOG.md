@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.2 — 2026-11-27
+
+- **LinkShot's own windows can be captured** on KDE Plasma: the About window, the Editor and the
+  Capture window used to vanish from screenshots (KWin hides the requesting app's windows unless told
+  not to), leaving whatever was behind them.
+- Screen Draw annotations now really end up in recordings on KDE, for the same reason. The drawing
+  area's frame and key hint show only for the first seconds of draw mode, so they stay out of the video.
+
 ## 0.8.1 — 2026-11-27
 
 - **Better Blur and Pixelate.** Blur now takes in a margin around the area, so its edges blend into the
