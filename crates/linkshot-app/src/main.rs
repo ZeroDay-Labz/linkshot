@@ -110,6 +110,12 @@ fn main() -> eframe::Result<()> {
     if single_instance::forward(request) { tracing::info!("linkshot is already running; request forwarded"); return Ok(()); }
     #[cfg(target_os = "linux")]
     identify_to_desktop();
+    #[cfg(windows)]
+    std::thread::spawn(|| match linkshot_platform::start_menu::ensure() {
+        Ok(true) => tracing::info!("Start menu entry written"),
+        Ok(false) => {}
+        Err(e) => tracing::warn!("Start menu entry: {e:#}"),
+    });
     // The root window is a tiny invisible controller (see `keepalive.rs`); the Capture window,
     // the Editor and the overlays are child viewports. Minimising or hiding any of them therefore
     // never stops the event loop that handles hotkeys, tray clicks and timers.

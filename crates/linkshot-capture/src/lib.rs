@@ -19,6 +19,17 @@ pub mod kwin {
 }
 #[cfg(target_os = "linux")]
 pub mod a11y_scroll;
+#[cfg(windows)]
+pub mod uia_scroll;
+/// Scrolling a view through the platform's accessibility interface (AT-SPI on Linux, UI Automation
+/// on Windows), used by Automatic Scrolling before it falls back to wheel events.
+#[cfg(any(target_os = "linux", windows))]
+pub mod scroll_a11y {
+    #[cfg(target_os = "linux")]
+    pub use crate::a11y_scroll::A11yScroller;
+    #[cfg(windows)]
+    pub use crate::uia_scroll::A11yScroller;
+}
 #[cfg(target_os = "linux")]
 pub mod portal;
 #[cfg(target_os = "linux")]

@@ -190,7 +190,22 @@ fn os_name() -> String {
         "Linux".into()
     }
     #[cfg(windows)]
-    { "Windows".into() }
+    { windows_version().unwrap_or_else(|| "Windows".into()) }
     #[cfg(not(any(target_os = "linux", windows)))]
     { std::env::consts::OS.into() }
+}
+
+/// "Windows 11 Pro 24H2 (build 26100)". ProductName still says "Windows 10" on Windows 11, so the
+/// build number decides.
+#[cfg(windows)]
+fn windows_version() -> Option<String> {
+    use std::os::windows::process::CommandExt;
+    let out = std::process::Command::new("reg").args(["query", r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion"]).creation_flags(0x0800_0000).output().ok()?;
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    let value = |key: &str| text.lines().find_map(|l| { let mut it = l.split_whitespace(); (it.next()? == key).then(|| { it.next(); it.collect::<Vec<_>>().join(" ") }) });
+    let build: u32 = value("CurrentBuild")?.parse().ok()?;
+    let mut name = value("ProductName").unwrap_or_else(|| "Windows".into());
+    if build >= 22000 { name = name.replacen("Windows 10", "Windows 11", 1); }
+    let display = value("DisplayVersion").map(|v| format!(" {v}")).unwrap_or_default();
+    Some(format!("{name}{display} (build {build})"))
 }

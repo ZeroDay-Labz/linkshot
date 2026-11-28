@@ -154,11 +154,11 @@ fn run(region: Rect, opts: ScrollOptions, paused: bool, etx: Sender<Event>, crx:
     let mut slowed_down = false;
     // Scrolling through the accessibility bus (exact steps, no pointer, no input permission), tried
     // first on KDE; `a11y_step` is in the scroll bar's units, calibrated from the measured offsets.
-    #[cfg(target_os = "linux")]
-    let mut a11y: Option<crate::a11y_scroll::A11yScroller> = None;
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", windows))]
+    let mut a11y: Option<crate::scroll_a11y::A11yScroller> = None;
+    #[cfg(any(target_os = "linux", windows))]
     let mut a11y_tried = false;
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", windows))]
     let mut a11y_step = 0.0f64;
     // Set when switching from accessibility to wheel scrolling mid-capture: aim the pointer, but do
     // not scroll back to the top and restart.
@@ -177,7 +177,7 @@ fn run(region: Rect, opts: ScrollOptions, paused: bool, etx: Sender<Event>, crx:
         let timeout = if running { Duration::from_millis(if auto { 10 } else { 40 }) } else { Duration::from_millis(100) };
         match crx.recv_timeout(timeout) {
             Ok(Command::Start) => running = true,
-            Ok(Command::SetAuto(a)) => { auto = a; auto_primed = false; #[cfg(target_os = "linux")] { a11y_tried = false; a11y = None; } unchanged_after_scroll = 0; pixel_mode = false; step = opts.notches.max(1); px_step = step as f64 * 100.0; }
+            Ok(Command::SetAuto(a)) => { auto = a; auto_primed = false; #[cfg(any(target_os = "linux", windows))] { a11y_tried = false; a11y = None; } unchanged_after_scroll = 0; pixel_mode = false; step = opts.notches.max(1); px_step = step as f64 * 100.0; }
             Ok(Command::Finish) => { finished = true; }
             Ok(Command::Cancel) => { cancelled = true; }
             Err(crossbeam_channel::RecvTimeoutError::Disconnected) => { cancelled = true; }
@@ -198,16 +198,16 @@ fn run(region: Rect, opts: ScrollOptions, paused: bool, etx: Sender<Event>, crx:
             continue;
         }
 
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", windows))]
         if auto && !a11y_tried && !auto_primed {
             a11y_tried = true;
             let c = region.center();
-            match crate::a11y_scroll::A11yScroller::find((c.x, c.y), opts.horizontal) {
+            match crate::scroll_a11y::A11yScroller::find((c.x, c.y), opts.horizontal) {
                 Ok(a) => { a11y_step = a.initial_step; a11y = Some(a); }
                 Err(e) => tracing::info!("accessibility scrolling unavailable ({e:#}); using wheel events"),
             }
         }
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", windows))]
         if auto && a11y.is_some() {
             let a = a11y.as_ref().unwrap();
             if !auto_primed {

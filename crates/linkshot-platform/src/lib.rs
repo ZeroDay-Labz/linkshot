@@ -44,10 +44,28 @@ pub fn open_url(url: &str) -> Result<()> {
 }
 /// Runs an arbitrary program with `<CaptureFilename>` substituted (the "Program" share output).
 pub fn run_program(executable: &str, parameters: &str, file: &std::path::Path) -> Result<()> {
-    let args_str = parameters.replace("<CaptureFilename>", &file.to_string_lossy());
-    let args = shell_words(&args_str);
-    std::process::Command::new(executable).args(args).spawn().with_context(|| format!("run {executable}"))?;
+    std::process::Command::new(executable).args(program_args(parameters, file)).spawn().with_context(|| format!("run {executable}"))?;
     Ok(())
+}
+
+/// The arguments for the Program destination: `parameters` split like a command line first, then
+/// `<CaptureFilename>` replaced inside each argument, so a file name with spaces or quotes stays one
+/// argument. No parameters at all means just the file.
+fn program_args(parameters: &str, file: &std::path::Path) -> Vec<String> {
+    let f = file.to_string_lossy();
+    if parameters.trim().is_empty() { return vec![f.into_owned()]; }
+    shell_words(parameters).into_iter().map(|w| w.replace("<CaptureFilename>", &f)).collect()
+}
+
+#[cfg(test)]
+mod program_args_tests {
+    #[test]
+    fn file_names_stay_one_argument() {
+        let f = std::path::Path::new("/tmp/My \"best\" shot.png");
+        assert_eq!(super::program_args("--open \"<CaptureFilename>\" -x", f), vec!["--open", "/tmp/My \"best\" shot.png", "-x"]);
+        assert_eq!(super::program_args("", f), vec!["/tmp/My \"best\" shot.png"]);
+        assert_eq!(super::program_args("<CaptureFilename>", f), vec!["/tmp/My \"best\" shot.png"]);
+    }
 }
 
 fn shell_words(s: &str) -> Vec<String> {
@@ -107,6 +125,8 @@ pub fn reveal(path: &std::path::Path) -> Result<()> {
 pub mod default_tool;
 pub mod update;
 pub mod upload;
+#[cfg(windows)]
+pub mod start_menu;
 
 pub mod autostart {
     //! "Run linkshot when the system starts".
