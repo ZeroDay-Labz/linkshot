@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.9.0 — 2026-11-27
+
+- **The crosshairs appear right away.** On live-screen captures (KDE) LinkShot no longer waits ~350 ms
+  for its own windows to fade before showing the overlay; the picture is taken after the selection, when
+  they are long gone. Frozen-screen captures keep the wait they need.
+
+Editor:
+- **No more switching to Move.** With any drawing tool, the handles of the selected object resize it
+  and dragging its body moves it; everywhere else the tool draws. Clicking an object still selects it.
+- **Emoji stamps:** 124 emoji (Noto Emoji) in Smileys, Gestures, Symbols, Arrows and Objects, picked
+  from a category menu in the Stamps panel next to the built-in shapes and your own stamps.
+- Tool panels: no empty Quick Styles box for tools without styles; sliders line up in neat columns.
+
+Windows:
+- **Automatic scrolling through UI Automation**: the view under the region (Explorer, browsers, Office,
+  most apps) is scrolled exactly through its scroll pattern, with wheel events as the fallback.
+- A Start menu entry for the single-file executable (kept pointing at it when it moves).
+- About ▸ System shows the real Windows edition, version and build.
+- The Program share destination keeps file names with spaces or quotes as one argument (all systems).
+
 ## 0.8.2 — 2026-11-27
 
 - **LinkShot's own windows can be captured** on KDE Plasma: the About window, the Editor and the

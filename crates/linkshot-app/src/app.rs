@@ -537,7 +537,12 @@ impl App {
             self.set_status("A capture is already in progress.");
             return;
         }
-        let mut delay = Duration::from_millis(50);
+        // Interactive captures on a live screen (KWin, ScreenCast) draw the crosshairs over the live
+        // desktop and take the picture only after the selection, by which time LinkShot's own windows
+        // are long gone: no waiting before the overlay. A frozen screenshot is taken right away, so
+        // it still waits for those windows to disappear.
+        let live = Self::interactive(&settings) && !self.settings.freeze_screen_during_capture && linkshot_capture::live::probe().is_some();
+        let mut delay = if live { Duration::ZERO } else { Duration::from_millis(50) };
         let mut schedule = false;
         let mut countdown = false;
         if settings.time_delay && settings.timed_capture_type == TimedCaptureType::Delay {
@@ -569,13 +574,20 @@ impl App {
             self.capture_visible = false;
             self.editor_visible = false;
             hidden = true;
-            if any_visible { delay += Duration::from_millis(300); }
+            if any_visible && (!live || delay > Duration::ZERO) { delay += Duration::from_millis(300); }
         }
         let bubble_pos = if countdown {
             linkshot_capture::monitors().ok().and_then(|ms| ms.iter().find(|m| m.is_primary).or(ms.first()).map(|m| [m.x as f32 + m.width as f32 - COUNTDOWN_W - 24.0, m.y as f32 + m.height as f32 - COUNTDOWN_H - 72.0]))
         } else { None };
         self.pending = Some(PendingCapture { settings, due: Instant::now() + delay, hidden, countdown, bubble_pos, bubble_placed: false });
         crate::keepalive::wake_after(ctx, delay);
+    }
+
+    /// Captures where the user selects on the overlay (region, window, scrolling, …), as opposed to
+    /// full screen, fixed region, clipboard or file.
+    fn interactive(settings: &CaptureSettings) -> bool {
+        !matches!(settings.selection_mode, SelectionMode::SelectionModeFullscreen | SelectionMode::SelectionModeClipboard | SelectionMode::SelectionModeFile)
+            && !(settings.selection_mode == SelectionMode::SelectionModeRegion && settings.selection_settings_region.region_selection_type == RegionSelectionType::RegionSelectionFixed)
     }
 
     fn run_pending(&mut self, ctx: &egui::Context) {
@@ -595,8 +607,7 @@ impl App {
         let settings = self.pending.take().unwrap().settings;
         // Interactive selection modes draw over the live screen unless the user prefers a frozen one
         // (or no live back-end exists, e.g. X11 without a compositor).
-        let interactive = !matches!(settings.selection_mode, SelectionMode::SelectionModeFullscreen | SelectionMode::SelectionModeClipboard | SelectionMode::SelectionModeFile)
-            && !(settings.selection_mode == SelectionMode::SelectionModeRegion && settings.selection_settings_region.region_selection_type == RegionSelectionType::RegionSelectionFixed);
+        let interactive = Self::interactive(&settings);
         let t_probe = Instant::now();
         let backend = if interactive && !self.settings.freeze_screen_during_capture { linkshot_capture::live::probe() } else { None };
         let t_layout = Instant::now();
