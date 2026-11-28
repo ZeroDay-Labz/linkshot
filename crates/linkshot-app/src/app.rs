@@ -1095,7 +1095,19 @@ impl eframe::App for App {
         if self.show_about {
             let pal = self.pal;
             let mut open = true;
-            if let Some(crate::about::Request::CheckForUpdates) = self.about.ui(ctx, &pal, &mut open) { self.check_for_updates(true); }
+            match self.about.ui(ctx, &pal, &mut open) {
+                Some(crate::about::Request::CheckForUpdates) => self.check_for_updates(true),
+                Some(crate::about::Request::Screenshot(img)) => {
+                    if let Some(p) = std::env::var_os("LINKSHOT_TEST_DUMP") { let _ = img.save(p); }
+                    if let Ok(png) = linkshot_render::encode_png(&img) {
+                        let (paths, settings) = (self.paths.clone(), self.settings.clone());
+                        self.editor.add_document(ctx, linkshot_core::Document::from_png(img.width(), img.height(), png), &paths, &settings);
+                        self.editor_visible = true;
+                        self.editor.set_status("Screenshot of the About window added. Save it or copy it to attach it to your report.");
+                    }
+                }
+                None => {}
+            }
             if !open { self.show_about = false; }
         }
 

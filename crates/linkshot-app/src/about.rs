@@ -5,12 +5,14 @@ use crate::theme::Palette;
 use egui::{Color32, RichText, Vec2};
 
 pub const TITLE: &str = "About LinkShot";
-pub const SIZE: [f32; 2] = [580.0, 790.0];
+pub const SIZE: [f32; 2] = [580.0, 830.0];
 const REPO: &str = "https://github.com/ZeroDay-Labz/linkshot";
 
 /// What the About window asks the app to do.
 pub enum Request {
     CheckForUpdates,
+    /// A picture of the About window (for bug reports), to open in the Editor.
+    Screenshot(image::RgbaImage),
 }
 
 /// Third-party software LinkShot ships or is built on: name, what it does here, licence, link.
@@ -31,6 +33,9 @@ pub struct About {
     pub renderer: String,
     system: Option<String>,
     copied_at: Option<std::time::Instant>,
+    frames: u32,
+    /// Drawn off screen for a screenshot of itself (no nested screenshots).
+    pub offscreen: bool,
 }
 
 impl About {
@@ -82,8 +87,12 @@ impl About {
         let copied = self.copied_at.is_some_and(|t| t.elapsed().as_secs_f32() < 2.0);
         let mut copy = false;
         let mut close = false;
+        let mut want_shot = false;
         ctx.show_viewport_immediate(egui::ViewportId::from_hash_of("about-window"), builder, |ctx, _class| {
             if ctx.input(|i| i.viewport().close_requested() || i.key_pressed(egui::Key::Escape)) { close = true; }
+            // Test hook (nested-compositor and headless tests): press "Screenshot This Window" once.
+            self.frames += 1;
+            if self.frames == 3 && std::env::var_os("LINKSHOT_TEST_ABOUT_SHOT").is_some() { want_shot = true; }
             egui::CentralPanel::default().frame(egui::Frame::new().fill(pal.main_panel).inner_margin(egui::Margin::same(22))).show(ctx, |ui| {
                 // Header: icon, name, version, description.
                 ui.horizontal(|ui| {
@@ -103,6 +112,9 @@ impl About {
                     if ui.button("Release Notes").clicked() { let _ = linkshot_platform::open_url(&format!("{REPO}/releases")); }
                     if ui.button("Report a Problem").on_hover_text("Opens the issue tracker; paste the system info below into your report.").clicked() { let _ = linkshot_platform::open_url(&format!("{REPO}/issues/new")); }
                     if ui.button("Check for Updates…").clicked() { request = Some(Request::CheckForUpdates); }
+                    if ui.button("Screenshot This Window").on_hover_text("Opens a picture of this window in the Editor, to attach to a bug report").clicked() {
+                        want_shot = true;
+                    }
                 });
 
                 // Footer first (bottom-up), so the scrollable middle takes what is left.
@@ -154,6 +166,9 @@ impl About {
             if linkshot_platform::clipboard::set_text(&system).is_ok() { self.copied_at = Some(std::time::Instant::now()); }
         }
         if close { *open = false; self.system = None; }
+        // The window drawn again off screen at 2× (the same software renderer as the documentation
+        // screenshots): exact, sharp, and independent of the desktop's screenshot rules.
+        if want_shot && !self.offscreen { request = Some(Request::Screenshot(crate::headless::render_about(pal, &self.renderer))); }
         request
     }
 }

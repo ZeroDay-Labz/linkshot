@@ -118,6 +118,20 @@ impl SoftwareRenderer {
 }
 
 /// Runs one egui frame headlessly and returns the rendered image.
+/// The About window rendered off screen at 2× (Help ▸ About ▸ Screenshot This Window).
+pub fn render_about(pal: &crate::theme::Palette, renderer_name: &str) -> RgbaImage {
+    let ctx = egui::Context::default();
+    crate::theme::apply(&ctx, pal);
+    let mut renderer = SoftwareRenderer::new();
+    let mut about = crate::about::About::default();
+    about.renderer = renderer_name.to_string();
+    about.offscreen = true;
+    let size = egui::vec2(crate::about::SIZE[0], crate::about::SIZE[1]);
+    // A few passes so layout and fonts settle (the first pass only measures).
+    for _ in 0..3 { let _ = render_frame(&ctx, &mut renderer, size, 2.0, pal.main_panel, |c| { let mut open = true; let _ = about.ui(c, pal, &mut open); }); }
+    render_frame(&ctx, &mut renderer, size, 2.0, pal.main_panel, |c| { let mut open = true; let _ = about.ui(c, pal, &mut open); })
+}
+
 pub fn render_frame(ctx: &egui::Context, renderer: &mut SoftwareRenderer, size: egui::Vec2, ppp: f32, background: Color32, mut run: impl FnMut(&egui::Context)) -> RgbaImage {
     let raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)), max_texture_side: Some(16384), ..Default::default() };
     ctx.set_pixels_per_point(ppp);
