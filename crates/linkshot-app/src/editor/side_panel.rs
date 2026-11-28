@@ -392,7 +392,8 @@ fn tool_properties(app: &mut App, ui: &mut egui::Ui, tool: ToolMode) {
                 let at = app.editor.current_doc().map(|d| { let p = d.doc.page(); Pt::new(p.capture_canvas_width / 2.0, p.capture_canvas_height / 2.0) }).unwrap_or(Pt::new(100.0, 100.0));
                 super::stamps::insert_stamp(app, i, at);
             }
-            ui.horizontal(|ui| {
+            // Wraps onto a second line when the panel is narrow (otherwise Refresh is cut off).
+            ui.horizontal_wrapped(|ui| {
                 if ui.button("Add stamps…").on_hover_text("Copy your own PNG/JPG files into the stamps folder").clicked() {
                     if let Some(files) = rfd::FileDialog::new().set_title("Add stamps").add_filter("Images", &["png", "jpg", "jpeg", "webp", "bmp"]).pick_files() {
                         let n = super::stamps::import_files(&dir, &files);

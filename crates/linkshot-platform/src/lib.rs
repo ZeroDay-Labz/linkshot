@@ -122,6 +122,14 @@ pub mod autostart {
     fn legacy_desktop_file() -> Option<std::path::PathBuf> {
         directories::BaseDirs::new().map(|b| b.config_dir().join("autostart/linkshot.desktop"))
     }
+    /// The program autostart should launch: the installed package when there is one, even while a
+    /// development build is running (a build from source must not take over the login session).
+    #[cfg(target_os = "linux")]
+    fn startup_exe() -> Option<std::path::PathBuf> {
+        let exe = std::env::current_exe().ok()?;
+        if exe.starts_with("/usr/") || exe.starts_with("/opt/") { return Some(exe); }
+        ["/usr/bin/linkshot", "/opt/linkshot/linkshot"].iter().map(std::path::PathBuf::from).find(|p| p.is_file()).or(Some(exe))
+    }
     #[cfg(target_os = "linux")]
     fn entry(exe: &std::path::Path) -> String {
         let exe = if exe.to_string_lossy().contains(' ') { format!("\"{}\"", exe.display()) } else { exe.display().to_string() };
@@ -134,7 +142,7 @@ pub mod autostart {
         #[cfg(target_os = "linux")]
         {
             let (Some(p), Some(old)) = (desktop_file(), legacy_desktop_file()) else { return };
-            let Ok(exe) = std::env::current_exe() else { return };
+            let Some(exe) = startup_exe() else { return };
             if old.exists() {
                 let _ = std::fs::remove_file(&old);
                 if let Some(dir) = p.parent() { let _ = std::fs::create_dir_all(dir); }
@@ -146,8 +154,8 @@ pub mod autostart {
                 let e = e.trim();
                 if let Some(rest) = e.strip_prefix('"') { rest.split('"').next().unwrap_or("").to_string() } else { e.split_whitespace().next().unwrap_or("").to_string() }
             });
-            // Rewrite when the program is gone, or when the installed package is running and the
-            // entry still starts some other build (a development copy).
+            // Rewrite when the program is gone, or when a package is installed and the entry still
+            // starts some other build (a development copy).
             let installed = exe.starts_with("/usr/") || exe.starts_with("/opt/");
             let stale = match &target {
                 None => true,
@@ -181,7 +189,7 @@ pub mod autostart {
             let Some(p) = desktop_file() else { return Ok(()); };
             if enabled {
                 std::fs::create_dir_all(p.parent().unwrap())?;
-                let exe = std::env::current_exe()?;
+                let exe = startup_exe().ok_or_else(|| anyhow::anyhow!("no executable"))?;
                 std::fs::write(&p, entry(&exe))?;
             } else if p.exists() {
                 std::fs::remove_file(p)?;

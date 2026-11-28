@@ -136,15 +136,24 @@ pub fn ensure_authorization(app_name: &str, desktop_id: &str) -> Result<bool> {
         let legacy = dir.join("linkshot.desktop");
         if std::fs::read_to_string(&legacy).map(|c| is_generated(&c)).unwrap_or(false) { let _ = std::fs::remove_file(&legacy); changed = true; }
     }
+    let ours = |p: &std::path::Path| std::fs::read_to_string(p).map(|c| is_generated(&c)).unwrap_or(false);
+    let devel = dir.join(format!("{desktop_id}.Devel.desktop"));
     if packaged_entry_for(desktop_id, &exe) {
-        if std::fs::read_to_string(&path).map(|c| is_generated(&c)).unwrap_or(false) { std::fs::remove_file(&path)?; changed = true; }
+        // The installed package: its own desktop file does everything.
+        for p in [&path, &devel] { if ours(p) { std::fs::remove_file(p)?; changed = true; } }
         if changed { rebuild_service_cache(); }
         return Ok(changed);
     }
+    // A build from source next to an installed package must not replace the package's menu entry
+    // (it would start the development build from the menu and autostart). It gets a hidden entry of
+    // its own, which is all KWin needs to allow it screenshots.
+    let side_by_side = packaged_entry_exists(desktop_id);
+    if side_by_side && ours(&path) { std::fs::remove_file(&path)?; changed = true; }
+    let (path, hidden) = if side_by_side { (devel, "NoDisplay=true\n") } else { (path, "") };
     std::fs::create_dir_all(&dir)?;
     let icon = std::env::var("LINKSHOT_ICON").ok().unwrap_or_else(|| "camera-photo".into());
     let exe_q = if exe.to_string_lossy().contains(' ') { format!("\"{}\"", exe.display()) } else { exe.display().to_string() };
-    let content = format!("[Desktop Entry]\nType=Application\nName={app_name}\nComment=Screen capture and editor\nExec={exe_q} %U\nTryExec={}\nIcon={icon}\nTerminal=false\nCategories=Graphics;Utility;\nStartupWMClass={desktop_id}\nX-KDE-DBUS-Restricted-Interfaces=org.kde.KWin.ScreenShot2\n{GENERATED_MARK}\nActions=capture;\n\n[Desktop Action capture]\nName=Capture now\nExec={exe_q} --capture\n", exe.display());
+    let content = format!("[Desktop Entry]\nType=Application\nName={app_name}\nComment=Screen capture and editor\nExec={exe_q} %U\nTryExec={}\nIcon={icon}\nTerminal=false\nCategories=Graphics;Utility;\n{hidden}StartupWMClass={desktop_id}\nX-KDE-DBUS-Restricted-Interfaces=org.kde.KWin.ScreenShot2\n{GENERATED_MARK}\nActions=capture;\n\n[Desktop Action capture]\nName=Capture now\nExec={exe_q} --capture\n", exe.display());
     if !std::fs::read_to_string(&path).map(|c| c == content).unwrap_or(false) {
         std::fs::write(&path, content)?;
         changed = true;
@@ -156,6 +165,12 @@ pub fn ensure_authorization(app_name: &str, desktop_id: &str) -> Result<bool> {
 fn is_generated(content: &str) -> bool {
     // Files from 0.5.0 and earlier carry no mark but have this exact comment.
     content.lines().any(|l| l == GENERATED_MARK) || content.lines().any(|l| l == "Comment=Screen capture and editor")
+}
+
+/// Is `<desktop_id>.desktop` installed system-wide (by the deb/rpm), for any executable?
+fn packaged_entry_exists(desktop_id: &str) -> bool {
+    let dirs = std::env::var("XDG_DATA_DIRS").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "/usr/local/share:/usr/share".into());
+    dirs.split(':').any(|d| std::path::Path::new(d).join("applications").join(format!("{desktop_id}.desktop")).is_file())
 }
 
 /// Is `<desktop_id>.desktop` installed system-wide (by the deb/rpm) for this executable?

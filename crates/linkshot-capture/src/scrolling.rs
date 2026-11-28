@@ -286,7 +286,10 @@ fn run(region: Rect, opts: ScrollOptions, paused: bool, etx: Sender<Event>, crx:
                 // Wheel events go to the window under the pointer, which is still on the HUD button
                 // the user just pressed: put the pointer in the middle of the region first.
                 let c = region.center();
-                if let Err(e) = s.move_to(c.x, c.y) { tracing::warn!("move pointer: {e:#}"); }
+                match s.move_to(c.x, c.y) {
+                    Ok(()) => tracing::info!("automatic scrolling: pointer at {:.0},{:.0} (region {:?})", c.x, c.y, region),
+                    Err(e) => tracing::warn!("automatic scrolling: could not move the pointer into the region: {e:#}"),
+                }
                 std::thread::sleep(Duration::from_millis(120));
                 // Scroll back to the start first, so the capture begins at the top/left edge.
                 if opts.scroll_from_top && !keep_position {
@@ -317,7 +320,9 @@ fn run(region: Rect, opts: ScrollOptions, paused: bool, etx: Sender<Event>, crx:
                         last_push = Some(p);
                         if matches!(p, Push::Scrolled { .. }) { ever_scrolled = true; }
                         if matches!(p, Push::NoChange) { unchanged_after_scroll += 1; } else { unchanged_after_scroll = 0; }
-                        if matches!(p, Push::NoMatch) && ever_scrolled {
+                        // Also before anything stitched: a first step that already jumps too far
+                        // (a short region, fast acceleration) must back up too, not run on blindly.
+                        if matches!(p, Push::NoMatch) {
                             // The step jumped past the last frame (scroll acceleration, a short
                             // viewport) or the content changed. Go back to where it overlapped and
                             // continue with smaller steps; give up only when the steps cannot shrink.

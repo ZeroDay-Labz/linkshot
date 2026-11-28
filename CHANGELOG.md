@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.8.1 — 2026-11-27
+
+- **Better Blur and Pixelate.** Blur now takes in a margin around the area, so its edges blend into the
+  picture instead of smearing; it goes much stronger, and a faint grain makes blurred text impossible to
+  recover with deblurring tools. Pixelate averages colours in linear light (true colours instead of mud)
+  and its cells sit on one grid across the image, so neighbouring pixelated areas line up.
+- Automatic scrolling backs up and slows down when the very first step already jumps too far (it used to
+  keep scrolling without stitching anything).
+- The Stamps panel's Refresh button no longer gets cut off; the buttons wrap in a narrow panel.
+- A copy built from source no longer takes over the app menu entry and autostart from the installed
+  package (it gets a hidden entry of its own), so Check for Updates and the menu always use the package.
+
 ## 0.8.0 — 2026-11-27
 
 - **Upload to Imgur and Nextcloud.** Both are in every Share menu and can be a preset's destination.

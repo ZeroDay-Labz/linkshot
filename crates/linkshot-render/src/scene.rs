@@ -325,13 +325,35 @@ impl Renderer {
             "Blur" => {
                 let Some(src) = backdrop.as_ref() else { return };
                 let r = shift_rect(dev_rect(b, s), t);
-                let Some(mut region) = crop_pixmap(src, r) else { return };
-                let intensity = obj.blur_intensity.unwrap_or(50.0).clamp(0.0, 100.0);
-                match obj.blur_type.unwrap_or(BlurType::Gaussian) {
-                    BlurType::Gaussian => blur::gaussian_blur(&mut region, (1.0 + intensity as f32 / 100.0 * 24.0) * s),
-                    BlurType::Pixellate => blur::pixelate(&mut region, ((4.0 + intensity / 100.0 * 28.0) * s as f64) as u32),
-                }
-                pm.draw_pixmap(r.left().round() as i32, r.top().round() as i32, region.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
+                let intensity = obj.blur_intensity.unwrap_or(50.0).clamp(0.0, 100.0) as f32;
+                // Where this pixmap sits in the whole rendered image (tiles are drawn with an offset).
+                let (ox, oy) = (-t.tx, -t.ty);
+                let (x0, y0) = (r.left().floor().max(0.0), r.top().floor().max(0.0));
+                let region = match obj.blur_type.unwrap_or(BlurType::Gaussian) {
+                    BlurType::Gaussian => {
+                        // Blur a margin around the area too, so its edges blend into the picture
+                        // instead of smearing the edge pixels inward; then keep only the area.
+                        let sigma = (1.5 + intensity / 100.0 * 38.0) * s;
+                        let pad = (sigma * 2.5).ceil();
+                        let rp = tiny_skia::Rect::from_ltrb(r.left() - pad, r.top() - pad, r.right() + pad, r.bottom() + pad).unwrap_or(r);
+                        let Some(mut big) = crop_pixmap(src, rp) else { return };
+                        let (bx, by) = (rp.left().floor().max(0.0), rp.top().floor().max(0.0));
+                        blur::gaussian_blur(&mut big, sigma);
+                        blur::add_grain(&mut big, (bx + ox) as i64, (by + oy) as i64, 3);
+                        let Some(inner) = tiny_skia::Rect::from_ltrb(x0 - bx, y0 - by, r.right() - bx, r.bottom() - by) else { return };
+                        let Some(region) = crop_pixmap(&big, inner) else { return };
+                        region
+                    }
+                    BlurType::Pixellate => {
+                        let Some(mut region) = crop_pixmap(src, r) else { return };
+                        let cell = ((4.0 + intensity / 100.0 * 28.0) * s).round().max(2.0) as u32;
+                        // Cells on a grid anchored to the image, not to the area.
+                        let (ax, ay) = ((x0 + ox).max(0.0) as u32, (y0 + oy).max(0.0) as u32);
+                        blur::pixelate(&mut region, cell, ax % cell, ay % cell);
+                        region
+                    }
+                };
+                pm.draw_pixmap(x0 as i32, y0 as i32, region.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
             }
             "Magnify" => {
                 let Some(src) = backdrop.as_ref() else { return };

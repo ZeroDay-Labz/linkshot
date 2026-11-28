@@ -127,36 +127,75 @@ pub fn gaussian_blur(pm: &mut Pixmap, sigma: f32) {
     pm.data_mut().copy_from_slice(&a);
 }
 
-/// Mosaic/pixelate with square cells of `cell` pixels (Blur tool "Pixelate").
-pub fn pixelate(pm: &mut Pixmap, cell: u32) {
+/// sRGB value → linear light (0..=65535), and back (from 4096 linear steps).
+fn srgb_tables() -> &'static ([u16; 256], [u8; 4096]) {
+    static T: std::sync::OnceLock<([u16; 256], [u8; 4096])> = std::sync::OnceLock::new();
+    T.get_or_init(|| {
+        let to_lin = |v: f32| if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) };
+        let to_srgb = |l: f32| if l <= 0.0031308 { l * 12.92 } else { 1.055 * l.powf(1.0 / 2.4) - 0.055 };
+        let lin: [u16; 256] = std::array::from_fn(|i| (to_lin(i as f32 / 255.0) * 65535.0).round() as u16);
+        let srgb: [u8; 4096] = std::array::from_fn(|i| (to_srgb(i as f32 / 4095.0) * 255.0).round().clamp(0.0, 255.0) as u8);
+        (lin, srgb)
+    })
+}
+
+/// Mosaic/pixelate with square cells of `cell` pixels (Blur tool "Pixelate"). Cells sit on a grid
+/// whose origin is `(-phase_x, -phase_y)` in this pixmap, so pixelated areas drawn separately (or in
+/// separate tiles) line up. Colours are averaged in linear light, which keeps them true (a plain
+/// average of sRGB values turns red-on-green text into a muddy brown).
+pub fn pixelate(pm: &mut Pixmap, cell: u32, phase_x: u32, phase_y: u32) {
     let cell = cell.max(2) as usize;
+    let (px, py) = (phase_x as usize % cell, phase_y as usize % cell);
     let w = pm.width() as usize;
     let h = pm.height() as usize;
+    let (lin, srgb) = srgb_tables();
     let data = pm.data_mut();
-    let mut y = 0;
-    while y < h {
-        let mut x = 0;
-        while x < w {
-            let (mut acc, mut n) = ([0u32; 4], 0u32);
-            for yy in y..(y + cell).min(h) {
-                for xx in x..(x + cell).min(w) {
-                    let o = (yy * w + xx) * 4;
-                    for c in 0..4 { acc[c] += data[o + c] as u32; }
+    let starts = |len: usize, phase: usize| -> Vec<usize> {
+        let mut v = vec![0];
+        let mut s = if phase == 0 { cell } else { cell - phase };
+        while s < len { v.push(s); s += cell; }
+        v
+    };
+    let (xs, ys) = (starts(w, px), starts(h, py));
+    for (yi, &y0) in ys.iter().enumerate() {
+        let y1 = ys.get(yi + 1).copied().unwrap_or(h);
+        for (xi, &x0) in xs.iter().enumerate() {
+            let x1 = xs.get(xi + 1).copied().unwrap_or(w);
+            let (mut acc, mut a_acc, mut n) = ([0u64; 3], 0u64, 0u64);
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    let o = (y * w + x) * 4;
+                    for c in 0..3 { acc[c] += lin[data[o + c] as usize] as u64; }
+                    a_acc += data[o + 3] as u64;
                     n += 1;
                 }
             }
-            if n > 0 {
-                let avg = [(acc[0] / n) as u8, (acc[1] / n) as u8, (acc[2] / n) as u8, (acc[3] / n) as u8];
-                for yy in y..(y + cell).min(h) {
-                    for xx in x..(x + cell).min(w) {
-                        let o = (yy * w + xx) * 4;
-                        data[o..o + 4].copy_from_slice(&avg);
-                    }
-                }
+            if n == 0 { continue; }
+            let a = (a_acc / n) as u8;
+            let mut avg = [0u8; 4];
+            for c in 0..3 { avg[c] = srgb[((acc[c] / n) as usize * 4095 / 65535).min(4095)].min(a); }
+            avg[3] = a;
+            for y in y0..y1 {
+                for x in x0..x1 { let o = (y * w + x) * 4; data[o..o + 4].copy_from_slice(&avg); }
             }
-            x += cell;
         }
-        y += cell;
+    }
+}
+
+/// Adds faint grain (±`amp` levels) that depends only on the pixel's absolute position
+/// (`origin` + x/y), so it is the same however the image is tiled. On a blur it defeats deblurring:
+/// the smooth gradients a deconvolution would need are no longer exact.
+pub fn add_grain(pm: &mut Pixmap, origin_x: i64, origin_y: i64, amp: u8) {
+    if amp == 0 { return; }
+    let w = pm.width() as usize;
+    let span = 2 * amp as u32 + 1;
+    for (i, px) in pm.data_mut().as_chunks_mut::<4>().0.iter_mut().enumerate() {
+        let (x, y) = ((i % w) as i64 + origin_x, (i / w) as i64 + origin_y);
+        let mut hsh = (x as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (y as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
+        hsh ^= hsh >> 31; hsh = hsh.wrapping_mul(0xBF58_476D_1CE4_E5B9); hsh ^= hsh >> 29;
+        let n = (hsh % span as u64) as i32 - amp as i32;
+        let a = px[3] as i32;
+        for c in 0..3 { px[c] = (px[c] as i32 + n).clamp(0, a) as u8; }
     }
 }
 
@@ -174,6 +213,38 @@ pub fn tint_alpha(pm: &mut Pixmap, color: tiny_skia::Color, opacity: f32) {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    fn solid(w: u32, h: u32, f: impl Fn(u32, u32) -> [u8; 4]) -> Pixmap {
+        let mut pm = Pixmap::new(w, h).unwrap();
+        for y in 0..h { for x in 0..w { let o = ((y * w + x) * 4) as usize; pm.data_mut()[o..o + 4].copy_from_slice(&f(x, y)); } }
+        pm
+    }
+
+    #[test]
+    fn pixelate_averages_in_linear_light_and_follows_the_grid() {
+        // Alternating black and white columns: the linear average is a light grey (~188), not 128.
+        let mut pm = solid(8, 8, |x, _| if x % 2 == 0 { [0, 0, 0, 255] } else { [255, 255, 255, 255] });
+        pixelate(&mut pm, 4, 0, 0);
+        let v = pm.data()[0];
+        assert!((185..=190).contains(&v), "{v}");
+        // With a phase of 2 the first cell is only 2 pixels wide.
+        let mut pm = solid(8, 1, |x, _| [if x < 2 { 200 } else { 0 }, 0, 0, 255]);
+        pixelate(&mut pm, 4, 2, 0);
+        assert_eq!(pm.data()[0], 200);
+        assert_eq!(pm.data()[2 * 4], 0);
+    }
+
+    #[test]
+    fn grain_is_position_based() {
+        let mut a = solid(16, 16, |_, _| [128, 128, 128, 255]);
+        let mut b = solid(8, 8, |_, _| [128, 128, 128, 255]);
+        add_grain(&mut a, 0, 0, 3);
+        add_grain(&mut b, 8, 8, 3);
+        // b's pixel (0,0) is a's pixel (8,8).
+        assert_eq!(&a.data()[(8 * 16 + 8) * 4..(8 * 16 + 8) * 4 + 4], &b.data()[0..4]);
+        assert!(a.data().chunks(4).all(|p| (125..=131).contains(&p[0])));
+    }
     #[test]
     fn reciprocal_division_is_exact() {
         for r in 0..2048u32 {
