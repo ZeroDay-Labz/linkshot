@@ -28,109 +28,113 @@ fn properties_panel(app: &mut App, ui: &mut egui::Ui) {
         // Move tool shows the properties of the selected object
         app.editor.current_doc().and_then(|d| app.editor.tools.selection.first().and_then(|id| d.doc.page().capture_objects.iter().find(|o| &o.object_id == id)).map(super::tools::tool_of)).unwrap_or(ToolMode::VectorSelection)
     } else { tool };
-    // ---- Quick Styles ----
-    let mut add_style = false;
-    widgets::panel_header(ui, &pal, "Quick Styles", |ui| {
-        if gallery_tool.supports_themes() && gallery_tool != ToolMode::Favorites {
-            if widgets::icon_button(ui, 18.0, "Save the current properties as a Quick Style", pal.control_dark, |p, r| icons::plus_icon(p, r, pal.text)).clicked() { add_style = true; }
+    // ---- Quick Styles ---- (only for tools that have styles: an empty box helps nobody)
+    let show_styles = gallery_tool.supports_themes() || gallery_tool == ToolMode::Favorites;
+    if show_styles {
+        // ---- Quick Styles ----
+        let mut add_style = false;
+        widgets::panel_header(ui, &pal, "Quick Styles", |ui| {
+            if gallery_tool.supports_themes() && gallery_tool != ToolMode::Favorites {
+                if widgets::icon_button(ui, 18.0, "Save the current properties as a Quick Style", pal.control_dark, |p, r| icons::plus_icon(p, r, pal.text)).clicked() { add_style = true; }
+            }
+        });
+        if add_style {
+            let mut q = app.editor.current_props();
+            q.tool_mode = gallery_tool;
+            q.is_default = false;
+            let ti = app.editor.current_theme;
+            app.editor.themes[ti].quick_styles.push(q);
+            let t = app.editor.themes[ti].clone();
+            let _ = t.write_file(&app.paths.themes_dir().join(format!("{}.snagtheme", t.id)));
         }
-    });
-    if add_style {
-        let mut q = app.editor.current_props();
-        q.tool_mode = gallery_tool;
-        q.is_default = false;
-        let ti = app.editor.current_theme;
-        app.editor.themes[ti].quick_styles.push(q);
-        let t = app.editor.themes[ti].clone();
-        let _ = t.write_file(&app.paths.themes_dir().join(format!("{}.snagtheme", t.id)));
-    }
-    if gallery_tool.supports_themes() {
-        // Theme row (42 px)
-        ui.allocate_ui_with_layout(Vec2::new(ui.available_width(), 42.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
-            ui.add_space(8.0);
-            ui.label(egui::RichText::new("Theme:").color(pal.text));
-            let names: Vec<String> = app.editor.themes.iter().map(|t| t.name.clone()).collect();
-            let mut idx = app.editor.current_theme;
-            egui::ComboBox::from_id_salt("theme-combo").width(150.0).selected_text(names.get(idx).cloned().unwrap_or_default()).show_ui(ui, |ui| {
-                for (i, n) in names.iter().enumerate() { ui.selectable_value(&mut idx, i, n); }
-                ui.separator();
-                if ui.button("Import...").clicked() {
-                    if let Some(p) = rfd::FileDialog::new().add_filter("LinkShot theme", &["snagtheme"]).pick_file() {
-                        if let Ok(t) = linkshot_core::style::Theme::read_file(&p) { let _ = t.write_file(&app.paths.themes_dir().join(format!("{}.snagtheme", t.id))); app.editor.themes.push(t); idx = app.editor.themes.len() - 1; }
+        if gallery_tool.supports_themes() {
+            // Theme row (42 px)
+            ui.allocate_ui_with_layout(Vec2::new(ui.available_width(), 42.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.add_space(8.0);
+                ui.label(egui::RichText::new("Theme:").color(pal.text));
+                let names: Vec<String> = app.editor.themes.iter().map(|t| t.name.clone()).collect();
+                let mut idx = app.editor.current_theme;
+                egui::ComboBox::from_id_salt("theme-combo").width(150.0).selected_text(names.get(idx).cloned().unwrap_or_default()).show_ui(ui, |ui| {
+                    for (i, n) in names.iter().enumerate() { ui.selectable_value(&mut idx, i, n); }
+                    ui.separator();
+                    if ui.button("Import...").clicked() {
+                        if let Some(p) = rfd::FileDialog::new().add_filter("LinkShot theme", &["snagtheme"]).pick_file() {
+                            if let Ok(t) = linkshot_core::style::Theme::read_file(&p) { let _ = t.write_file(&app.paths.themes_dir().join(format!("{}.snagtheme", t.id))); app.editor.themes.push(t); idx = app.editor.themes.len() - 1; }
+                        }
                     }
+                    if ui.button("New Theme...").clicked() {
+                        let mut t = linkshot_core::style::Theme { name: format!("Theme {}", app.editor.themes.len() + 1), theme_colors: app.editor.theme().theme_colors.clone(), ..Default::default() };
+                        t.generate_quick_styles();
+                        let _ = t.write_file(&app.paths.themes_dir().join(format!("{}.snagtheme", t.id)));
+                        app.editor.themes.push(t); idx = app.editor.themes.len() - 1;
+                    }
+                    if ui.button("Export current...").clicked() {
+                        let t = app.editor.theme().clone();
+                        if let Some(p) = rfd::FileDialog::new().set_file_name(format!("{}.snagtheme", t.name)).add_filter("LinkShot theme", &["snagtheme"]).save_file() { let _ = t.write_file(&p); }
+                    }
+                });
+                if idx != app.editor.current_theme { app.editor.current_theme = idx; app.settings.current_theme_id = app.editor.themes[idx].id.clone(); app.mark_settings_dirty(); }
+            });
+            widgets::separator_h(ui, &pal);
+        }
+        // Gallery
+        let gallery_h = app.settings.quick_styles_height.clamp(80.0, 400.0);
+        let styles: Vec<QuickStyle> = if gallery_tool == ToolMode::Favorites {
+            app.editor.themes.iter().flat_map(|t| t.quick_styles.iter().filter(|q| q.is_favorited).cloned()).collect()
+        } else { app.editor.theme().styles_for(gallery_tool).cloned().collect() };
+        let current = app.editor.current_props();
+        let mut picked: Option<QuickStyle> = None;
+        let mut toggle_fav: Option<usize> = None;
+        egui::ScrollArea::vertical().max_height(gallery_h).id_salt("qs-scroll").show(ui, |ui| {
+            ui.add_space(8.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.add_space(8.0);
+                ui.spacing_mut().item_spacing = Vec2::new(6.0, 6.0);
+                for (i, q) in styles.iter().enumerate() {
+                    let (r, resp) = ui.allocate_exact_size(Vec2::splat(40.0), Sense::click());
+                    let selected = q.foreground_color == current.foreground_color && q.background_color == current.background_color && q.stroke_width == current.stroke_width && q.callout_shape == current.callout_shape && q.tool_shape == current.tool_shape && q.step_style == current.step_style && q.arrow_end == current.arrow_end && q.font_size == current.font_size && q.text_selection_color == current.text_selection_color;
+                    ui.painter().rect_filled(r, 6.0, if selected { pal.product.gamma_multiply(if pal.is_dark { 0.25 } else { 0.14 }) } else if resp.hovered() { pal.control } else { Color32::TRANSPARENT });
+                    if selected { ui.painter().rect_stroke(r, 6.0, Stroke::new(1.0_f32, pal.product_bright), egui::StrokeKind::Inside); }
+                    style_preview(ui.painter(), r.shrink(5.0), q, pal.text);
+                    // star
+                    if resp.hovered() || q.is_favorited {
+                        let sr = Rect::from_center_size(r.right_top() + Vec2::new(-6.0, 6.0), Vec2::splat(10.0));
+                        let star = ui.interact(sr, ui.id().with(("fav", i)), Sense::click());
+                        icons::tool_icon(ui.painter(), sr, ToolMode::Favorites, if q.is_favorited { pal.favorites_star } else { pal.favorites_grey });
+                        if star.clicked() { toggle_fav = Some(i); }
+                    }
+                    if resp.clicked() { picked = Some(q.clone()); }
+                    resp.context_menu(|ui| { if ui.button("Delete Quick Style").clicked() { toggle_fav = Some(usize::MAX - i); ui.close(); } });
                 }
-                if ui.button("New Theme...").clicked() {
-                    let mut t = linkshot_core::style::Theme { name: format!("Theme {}", app.editor.themes.len() + 1), theme_colors: app.editor.theme().theme_colors.clone(), ..Default::default() };
-                    t.generate_quick_styles();
-                    let _ = t.write_file(&app.paths.themes_dir().join(format!("{}.snagtheme", t.id)));
-                    app.editor.themes.push(t); idx = app.editor.themes.len() - 1;
-                }
-                if ui.button("Export current...").clicked() {
-                    let t = app.editor.theme().clone();
-                    if let Some(p) = rfd::FileDialog::new().set_file_name(format!("{}.snagtheme", t.name)).add_filter("LinkShot theme", &["snagtheme"]).save_file() { let _ = t.write_file(&p); }
+                if gallery_tool == ToolMode::Favorites && styles.is_empty() {
+                    ui.label(egui::RichText::new("Star Quick Styles from any tool to collect your favourites here.").color(pal.text.gamma_multiply(0.6)));
                 }
             });
-            if idx != app.editor.current_theme { app.editor.current_theme = idx; app.settings.current_theme_id = app.editor.themes[idx].id.clone(); app.mark_settings_dirty(); }
-        });
-        widgets::separator_h(ui, &pal);
-    }
-    // Gallery
-    let gallery_h = app.settings.quick_styles_height.clamp(80.0, 400.0);
-    let styles: Vec<QuickStyle> = if gallery_tool == ToolMode::Favorites {
-        app.editor.themes.iter().flat_map(|t| t.quick_styles.iter().filter(|q| q.is_favorited).cloned()).collect()
-    } else { app.editor.theme().styles_for(gallery_tool).cloned().collect() };
-    let current = app.editor.current_props();
-    let mut picked: Option<QuickStyle> = None;
-    let mut toggle_fav: Option<usize> = None;
-    egui::ScrollArea::vertical().max_height(gallery_h).id_salt("qs-scroll").show(ui, |ui| {
-        ui.add_space(8.0);
-        ui.horizontal_wrapped(|ui| {
             ui.add_space(8.0);
-            ui.spacing_mut().item_spacing = Vec2::new(6.0, 6.0);
-            for (i, q) in styles.iter().enumerate() {
-                let (r, resp) = ui.allocate_exact_size(Vec2::splat(40.0), Sense::click());
-                let selected = q.foreground_color == current.foreground_color && q.background_color == current.background_color && q.stroke_width == current.stroke_width && q.callout_shape == current.callout_shape && q.tool_shape == current.tool_shape && q.step_style == current.step_style && q.arrow_end == current.arrow_end && q.font_size == current.font_size && q.text_selection_color == current.text_selection_color;
-                ui.painter().rect_filled(r, 6.0, if selected { pal.product.gamma_multiply(if pal.is_dark { 0.25 } else { 0.14 }) } else if resp.hovered() { pal.control } else { Color32::TRANSPARENT });
-                if selected { ui.painter().rect_stroke(r, 6.0, Stroke::new(1.0_f32, pal.product_bright), egui::StrokeKind::Inside); }
-                style_preview(ui.painter(), r.shrink(5.0), q, pal.text);
-                // star
-                if resp.hovered() || q.is_favorited {
-                    let sr = Rect::from_center_size(r.right_top() + Vec2::new(-6.0, 6.0), Vec2::splat(10.0));
-                    let star = ui.interact(sr, ui.id().with(("fav", i)), Sense::click());
-                    icons::tool_icon(ui.painter(), sr, ToolMode::Favorites, if q.is_favorited { pal.favorites_star } else { pal.favorites_grey });
-                    if star.clicked() { toggle_fav = Some(i); }
-                }
-                if resp.clicked() { picked = Some(q.clone()); }
-                resp.context_menu(|ui| { if ui.button("Delete Quick Style").clicked() { toggle_fav = Some(usize::MAX - i); ui.close(); } });
-            }
-            if gallery_tool == ToolMode::Favorites && styles.is_empty() {
-                ui.label(egui::RichText::new("Star Quick Styles from any tool to collect your favourites here.").color(pal.text.gamma_multiply(0.6)));
-            }
         });
-        ui.add_space(8.0);
-    });
-    if let Some(i) = toggle_fav {
-        let ti = app.editor.current_theme;
-        if i >= usize::MAX / 2 {
-            let idx = usize::MAX - i;
-            if let Some(q) = styles.get(idx) { let q = q.clone(); app.editor.themes[ti].quick_styles.retain(|x| *x != q); }
-        } else if gallery_tool != ToolMode::Favorites {
-            if let Some(q) = styles.get(i) { let q = q.clone(); if let Some(x) = app.editor.themes[ti].quick_styles.iter_mut().find(|x| **x == q) { x.is_favorited = !x.is_favorited; } }
-        } else if let Some(q) = styles.get(i) { let q = q.clone(); for t in app.editor.themes.iter_mut() { if let Some(x) = t.quick_styles.iter_mut().find(|x| **x == q) { x.is_favorited = false; } } }
-        let t = app.editor.themes[ti].clone();
-        let _ = t.write_file(&app.paths.themes_dir().join(format!("{}.snagtheme", t.id)));
+        if let Some(i) = toggle_fav {
+            let ti = app.editor.current_theme;
+            if i >= usize::MAX / 2 {
+                let idx = usize::MAX - i;
+                if let Some(q) = styles.get(idx) { let q = q.clone(); app.editor.themes[ti].quick_styles.retain(|x| *x != q); }
+            } else if gallery_tool != ToolMode::Favorites {
+                if let Some(q) = styles.get(i) { let q = q.clone(); if let Some(x) = app.editor.themes[ti].quick_styles.iter_mut().find(|x| **x == q) { x.is_favorited = !x.is_favorited; } }
+            } else if let Some(q) = styles.get(i) { let q = q.clone(); for t in app.editor.themes.iter_mut() { if let Some(x) = t.quick_styles.iter_mut().find(|x| **x == q) { x.is_favorited = false; } } }
+            let t = app.editor.themes[ti].clone();
+            let _ = t.write_file(&app.paths.themes_dir().join(format!("{}.snagtheme", t.id)));
+        }
+        if let Some(q) = picked {
+            let t = q.tool_mode;
+            if gallery_tool == ToolMode::Favorites { app.editor.tool = t; }
+            app.editor.props.insert(t, q.clone());
+            apply_to_selection(app, &q);
+        }
+        // splitter
+        let (sr, sresp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 6.0), Sense::drag());
+        ui.painter().hline(sr.x_range(), sr.center().y, Stroke::new(1.0_f32, pal.separator));
+        if sresp.dragged() { app.settings.quick_styles_height = (app.settings.quick_styles_height + sresp.drag_delta().y).clamp(80.0, 400.0); app.mark_settings_dirty(); }
+        if sresp.hovered() { ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical); }
     }
-    if let Some(q) = picked {
-        let t = q.tool_mode;
-        if gallery_tool == ToolMode::Favorites { app.editor.tool = t; }
-        app.editor.props.insert(t, q.clone());
-        apply_to_selection(app, &q);
-    }
-    // splitter
-    let (sr, sresp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 6.0), Sense::drag());
-    ui.painter().hline(sr.x_range(), sr.center().y, Stroke::new(1.0_f32, pal.separator));
-    if sresp.dragged() { app.settings.quick_styles_height = (app.settings.quick_styles_height + sresp.drag_delta().y).clamp(80.0, 400.0); app.mark_settings_dirty(); }
-    if sresp.hovered() { ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical); }
     // ---- Tool Properties ----
     widgets::panel_header(ui, &pal, "Tool Properties", |ui| {
         ui.label(egui::RichText::new(gallery_tool.label()).color(pal.text.gamma_multiply(0.7)).small());
@@ -205,11 +209,15 @@ fn color_row(ui: &mut egui::Ui, label: &str, c: &mut Argb) -> bool {
 fn slider_row(ui: &mut egui::Ui, label: &str, v: &mut f64, range: std::ops::RangeInclusive<f64>, suffix: &str) -> bool {
     let mut f = *v as f32;
     let mut changed = false;
+    // Fixed columns (label, slider, value box) so the sliders of a panel line up whatever the
+    // label or value width.
     ui.horizontal(|ui| {
-        ui.label(label);
+        let h = ui.spacing().interact_size.y;
+        ui.allocate_ui_with_layout(egui::vec2(72.0, h), egui::Layout::left_to_right(egui::Align::Center), |ui| { ui.set_min_width(72.0); ui.add(egui::Label::new(label).truncate()); });
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let r = ui.add(egui::DragValue::new(&mut f).range(*range.start() as f32..=*range.end() as f32).suffix(suffix).speed(0.5));
+            let r = ui.add_sized([66.0, h], egui::DragValue::new(&mut f).range(*range.start() as f32..=*range.end() as f32).suffix(suffix).speed(0.5));
             changed |= r.changed();
+            ui.spacing_mut().slider_width = (ui.available_width() - 8.0).max(40.0);
             changed |= ui.add(egui::Slider::new(&mut f, *range.start() as f32..=*range.end() as f32).show_value(false)).changed();
         });
     });
