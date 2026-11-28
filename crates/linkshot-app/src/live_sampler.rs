@@ -60,7 +60,7 @@ impl LiveSampler {
 /// The desktop without LinkShot's windows (KWin leaves them out), for the loupe.
 fn grab_once() -> Option<linkshot_capture::Snapshot> {
     #[cfg(target_os = "linux")]
-    { linkshot_capture::kwin::without_own_windows(|| linkshot_capture::snapshot()).map_err(|e| tracing::warn!("magnifier snapshot: {e:#}")).ok() }
+    { linkshot_capture::kwin::without_own_windows(linkshot_capture::snapshot).map_err(|e| tracing::warn!("magnifier snapshot: {e:#}")).ok() }
     #[cfg(not(target_os = "linux"))]
     { linkshot_capture::snapshot().ok() }
 }
