@@ -315,9 +315,33 @@ pub fn handle_input(app: &mut App, ui: &mut egui::Ui, resp: &Response, canvas: R
     let tol = 6.0 / cv_zoom as f64;
     let hover = pointer.filter(|p| canvas.contains(*p));
 
-    // Cursor + hover handle detection for Move tool
+    // Drawing tools act like Move over the selection: its handles resize it and its body moves it,
+    // so a shape just drawn can be adjusted without switching tools. Anywhere else they draw.
+    let object_tool = matches!(tool, ToolMode::Arrow | ToolMode::Line | ToolMode::Shape | ToolMode::Highlight | ToolMode::Blur | ToolMode::Magnify | ToolMode::Callouts | ToolMode::Text | ToolMode::Step | ToolMode::Stamp | ToolMode::Pen)
+        && app.editor.tools.poly_points.is_empty();
+    let smart = object_tool && !app.editor.tools.selection.is_empty() && app.editor.tools.text_edit.is_none();
+    let over_selected = |app: &App, p: Pt| app.editor.current_doc().and_then(|d| hit_test(&d.doc, p, tol)).map(|id| app.editor.tools.selection.contains(&id)).unwrap_or(false);
+    // Cursor + hover handle detection for Move tool (and for drawing tools over the selection)
     app.editor.tools.hover_handle = None;
-    if tool == ToolMode::VectorSelection && app.editor.tools.drag.is_none() {
+    let mut smart_hover = false;
+    if smart && app.editor.tools.drag.is_none() {
+        if let (Some(hp), Some(doc)) = (hover, app.editor.current_doc()) {
+            let mut hover_handle: Option<Handle> = None;
+            for id in &app.editor.tools.selection {
+                if let Some(o) = doc.doc.page().capture_objects.iter().find(|o| &o.object_id == id) {
+                    for (h, pos) in handles_for(o, &app.editor.canvas) { if pos.distance(hp) <= HANDLE { hover_handle = Some(h); } }
+                }
+            }
+            let body = hover_handle.is_none() && over_selected(app, dp);
+            smart_hover = hover_handle.is_some() || body;
+            if smart_hover {
+                ctx.set_cursor_icon(match &hover_handle { Some(Handle::N | Handle::S) => egui::CursorIcon::ResizeVertical, Some(Handle::E | Handle::W) => egui::CursorIcon::ResizeHorizontal, Some(Handle::NE | Handle::SW) => egui::CursorIcon::ResizeNeSw, Some(Handle::NW | Handle::SE) => egui::CursorIcon::ResizeNwSe, Some(_) => egui::CursorIcon::Grab, None => egui::CursorIcon::Move });
+            }
+            app.editor.tools.hover_handle = hover_handle;
+        }
+    }
+    if smart_hover {
+    } else if tool == ToolMode::VectorSelection && app.editor.tools.drag.is_none() {
         if let (Some(hp), Some(doc)) = (hover, app.editor.current_doc()) {
             let mut hover_handle: Option<Handle> = None;
             for id in &app.editor.tools.selection {
@@ -337,6 +361,9 @@ pub fn handle_input(app: &mut App, ui: &mut egui::Ui, resp: &Response, canvas: R
     if resp.drag_started_by(egui::PointerButton::Primary) && app.editor.tools.text_edit.is_none() {
         // Anchor at the press position, not where the drag threshold was crossed.
         let dp = ctx.input(|i| i.pointer.press_origin()).map(|p| app.editor.canvas.screen_to_doc(p)).unwrap_or(dp);
+        // Over the selection a drawing tool moves or resizes it instead of drawing.
+        let press_on_selection = smart && (app.editor.tools.hover_handle.is_some() || over_selected(app, dp));
+        let tool = if press_on_selection { ToolMode::VectorSelection } else { tool };
         match tool {
             ToolMode::VectorSelection | ToolMode::Favorites | ToolMode::Fill | ToolMode::Stamp | ToolMode::MagicWand | ToolMode::SimplifiedUI | ToolMode::None | ToolMode::DropZone | ToolMode::LastTool => {
                 if tool == ToolMode::VectorSelection {

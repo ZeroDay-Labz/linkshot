@@ -195,6 +195,12 @@ pub fn run_shots(dir: &std::path::Path, files: &[std::path::PathBuf], dark: bool
             for _ in 0..2 { let _ = render_frame(&ectx, &mut renderer, egui::vec2(1280.0, 820.0), 1.5, bg, |ctx| crate::editor::editor_ui(&mut app, ctx, &mut actions)); }
             let img = render_frame(&ectx, &mut renderer, egui::vec2(1280.0, 820.0), 1.5, bg, |ctx| crate::editor::editor_ui(&mut app, ctx, &mut actions));
             img.save(dir.join("editor_simplify.png"))?;
+            // Stamps panel with the emoji picker.
+            app.editor.select_tool(linkshot_core::enums::ToolMode::Stamp);
+            app.editor.stamps.category = "Smileys".into();
+            for _ in 0..2 { let _ = render_frame(&ectx, &mut renderer, egui::vec2(1280.0, 820.0), 1.5, bg, |ctx| crate::editor::editor_ui(&mut app, ctx, &mut actions)); }
+            let img = render_frame(&ectx, &mut renderer, egui::vec2(1280.0, 820.0), 1.5, bg, |ctx| crate::editor::editor_ui(&mut app, ctx, &mut actions));
+            img.save(dir.join("editor_stamps_emoji.png"))?;
             // Combine: the last two captures as before/after, then numbered steps.
             for (layout, name) in [(crate::editor::combine::Layout::BeforeAfter, "editor_combine_before_after.png"), (crate::editor::combine::Layout::Steps, "editor_combine_steps.png")] {
                 let (n, c) = (app.editor.docs.len(), app.editor.current);

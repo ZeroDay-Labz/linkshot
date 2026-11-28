@@ -369,11 +369,20 @@ fn tool_properties(app: &mut App, ui: &mut egui::Ui, tool: ToolMode) {
             ui.label(egui::RichText::new("Click a stamp to add it, then click the canvas to place more.").small().color(pal.input_secondary));
             let n = app.editor.stamps.stamps.len();
             let mut picked: Option<usize> = None;
+            // Category picker: the built-in shapes, emoji groups, the user's own stamps.
+            let cats = app.editor.stamps.categories();
+            if !cats.iter().any(|c| *c == app.editor.stamps.category) { app.editor.stamps.category = cats.first().map(|c| c.to_string()).unwrap_or_default(); }
+            egui::ComboBox::from_id_salt("stamp-category").selected_text(app.editor.stamps.category.clone()).width(ui.available_width().min(220.0)).show_ui(ui, |ui| {
+                for c in &cats { ui.selectable_value(&mut app.editor.stamps.category, c.to_string(), *c); }
+            });
+            ui.add_space(4.0);
+            let category = app.editor.stamps.category.clone();
             let ctx = ui.ctx().clone();
             egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing = egui::Vec2::splat(6.0);
                     for i in 0..n {
+                        if app.editor.stamps.stamps[i].category != category { continue; }
                         let Some(tid) = app.editor.stamps.texture(&ctx, i) else { continue };
                         let selected = app.editor.tools.current_stamp == Some(i);
                         let name = app.editor.stamps.stamps[i].name.clone();

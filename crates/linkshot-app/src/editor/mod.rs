@@ -2,6 +2,7 @@
 
 pub mod canvas;
 pub mod combine;
+pub mod emoji;
 pub mod side_panel;
 pub mod simplify;
 pub mod stamps;

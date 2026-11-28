@@ -18,11 +18,18 @@ pub struct Stamp {
     pub height: u32,
     #[allow(dead_code)]
     pub path: Option<PathBuf>,
+    /// Group in the Stamps panel: "Shapes", an emoji category, or "My stamps".
+    pub category: &'static str,
 }
+
+pub const SHAPES: &str = "Shapes";
+pub const MINE: &str = "My stamps";
 
 #[derive(Default)]
 pub struct StampLibrary {
     pub stamps: Vec<Stamp>,
+    /// Category shown in the panel (empty = the first one).
+    pub category: String,
     textures: Vec<Option<egui::TextureHandle>>,
     loaded: bool,
 }
@@ -33,9 +40,17 @@ impl StampLibrary {
         if self.loaded && !force { return; }
         self.loaded = true;
         let mut v = builtin().clone();
+        v.extend(emoji_stamps().iter().cloned());
         v.extend(user_stamps(dir));
         self.stamps = v;
         self.textures = vec![];
+    }
+
+    /// Categories in panel order (only those with stamps).
+    pub fn categories(&self) -> Vec<&'static str> {
+        let mut out: Vec<&'static str> = vec![];
+        for s in &self.stamps { if !out.contains(&s.category) { out.push(s.category); } }
+        out
     }
 
     pub fn texture(&mut self, ctx: &egui::Context, i: usize) -> Option<egui::TextureId> {
@@ -61,7 +76,7 @@ pub fn user_stamps(dir: &Path) -> Vec<Stamp> {
         let Ok(img) = image::open(&p) else { continue };
         let img = img.to_rgba8();
         let Ok(png) = linkshot_render::encode_png(&img) else { continue };
-        out.push(Stamp { name: p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(), png: Arc::new(png), width: img.width(), height: img.height(), path: Some(p) });
+        out.push(Stamp { name: p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(), png: Arc::new(png), width: img.width(), height: img.height(), path: Some(p), category: MINE });
     }
     out
 }
@@ -100,6 +115,12 @@ pub fn insert_stamp(app: &mut App, i: usize, at: Pt) {
 
 // ------------------------------------------------------------------ built-in set
 
+/// The built-in emoji (see `emoji.rs`), 128 px each.
+pub fn emoji_stamps() -> &'static Vec<Stamp> {
+    static SET: OnceLock<Vec<Stamp>> = OnceLock::new();
+    SET.get_or_init(|| super::emoji::CATEGORIES.iter().flat_map(|(cat, list)| list.iter().map(move |e| Stamp { name: e.name.to_string(), png: Arc::new(e.png.to_vec()), width: 128, height: 128, path: None, category: cat })).collect())
+}
+
 pub fn builtin() -> &'static Vec<Stamp> {
     static SET: OnceLock<Vec<Stamp>> = OnceLock::new();
     SET.get_or_init(|| {
@@ -107,7 +128,7 @@ pub fn builtin() -> &'static Vec<Stamp> {
         let mut add = |name: &str, draw: &dyn Fn(&mut Pixmap)| {
             let mut pm = Pixmap::new(SIZE, SIZE).expect("pixmap");
             draw(&mut pm);
-            if let Ok(png) = pm.encode_png() { v.push(Stamp { name: name.into(), png: Arc::new(png), width: SIZE, height: SIZE, path: None }); }
+            if let Ok(png) = pm.encode_png() { v.push(Stamp { name: name.into(), png: Arc::new(png), width: SIZE, height: SIZE, path: None, category: SHAPES }); }
         };
         add("Check", &|pm| { disc(pm, GREEN); check(pm, WHITE); });
         add("Cross", &|pm| { disc(pm, RED); cross(pm, WHITE); });

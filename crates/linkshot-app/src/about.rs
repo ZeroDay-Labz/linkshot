@@ -24,6 +24,7 @@ const CREDITS: &[(&str, &str, &str, &str)] = &[
     ("wgpu", "GPU rendering", "MIT / Apache-2.0", "https://wgpu.rs"),
     ("tiny-skia", "annotation rendering", "BSD-3-Clause", "https://github.com/linebender/tiny-skia"),
     ("Inter", "typeface", "SIL OFL 1.1", "https://rsms.me/inter"),
+    ("Noto Emoji", "emoji stamps", "Apache-2.0", "https://github.com/googlefonts/noto-emoji"),
 ];
 
 #[derive(Default)]

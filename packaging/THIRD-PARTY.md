@@ -11,6 +11,7 @@ in this directory; LinkShot itself is licensed under MIT OR Apache-2.0.
 | Tesseract OCR (`tesseract.exe`, Windows) | 5.4.0 (UB Mannheim build) | Apache-2.0 (`tesseract-LICENSE`) | https://github.com/UB-Mannheim/tesseract |
 | Tesseract language data (`tessdata`) | eng, osd (+ deu, fin, fra, por, rus, spa on Linux) | Apache-2.0 | https://github.com/tesseract-ocr/tessdata |
 | ocrs models (`ocrs/*.rten`) | text-detection, text-recognition | see the ocrs project | https://github.com/robertknight/ocrs |
+| Noto Emoji (stamps, built into the program) | 124 images, 128 px | Apache-2.0 (`packaging/emoji/LICENSE`) | https://github.com/googlefonts/noto-emoji |
 
 The DLLs beside `tesseract.exe` (Leptonica, libpng, libjpeg-turbo, libtiff, libwebp, OpenJPEG, giflib,
 libarchive, zlib, zstd, lz4, xz, bzip2, libexpat, libiconv, OpenSSL, GCC runtime) are the MSYS2 builds
