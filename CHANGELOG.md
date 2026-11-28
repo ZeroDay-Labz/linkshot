@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.1 — 2026-11-27
+
+- **Smoother capture overlay.** The magnifier used to ask KWin for a fresh screenshot about 15 times
+  a second while the pointer moved, and the window list was re-read through a KWin script twice a
+  second; both made the compositor itself work and the whole desktop could stutter. Now one picture
+  of the desktop is taken in the background as the overlay opens, and the loupe and window highlight
+  come from it.
+- Each capture logs how smoothly the overlay ran (frames per second, longest pause) for diagnosis.
+
 ## 0.9.0 — 2026-11-27
 
 - **The crosshairs appear right away.** On live-screen captures (KDE) LinkShot no longer waits ~350 ms

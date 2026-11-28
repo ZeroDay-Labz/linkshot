@@ -58,6 +58,9 @@ pub struct Overlay {
     width_text: String,
     height_text: String,
     pub frames: u32,
+    /// Frame pacing for the end-of-capture log line: last frame time and the longest gap seen.
+    last_frame: Option<std::time::Instant>,
+    worst_gap: std::time::Duration,
     /// Set once the compositor has been asked to put each overlay window on its monitor.
     pub placement_started: bool,
     /// Monitor whose viewport last saw the pointer.
@@ -72,7 +75,7 @@ pub struct Overlay {
 impl Overlay {
     pub fn new(snapshot: Snapshot, monitor_idx: usize, settings: CaptureSettings, show_magnifier: bool) -> Self {
         let n = snapshot.monitors.len();
-        Self { snapshot, settings, textures: (0..n).map(|_| None).collect(), phase: Phase::Selecting { drag_start: None }, show_magnifier, result: None, blank: None, sampler: None, loupe: None, focus_sent: false, hover_window: None, hud_drag: Vec2::ZERO, resize: None, width_text: String::new(), height_text: String::new(), frames: 0, placement_started: false, active_monitor: monitor_idx, single_monitor: None, single_resolved: false, drag_point: std::cell::Cell::new(Pt::new(0.0, 0.0)), created: std::time::Instant::now() }
+        Self { snapshot, settings, textures: (0..n).map(|_| None).collect(), phase: Phase::Selecting { drag_start: None }, show_magnifier, result: None, blank: None, sampler: None, loupe: None, focus_sent: false, hover_window: None, hud_drag: Vec2::ZERO, resize: None, width_text: String::new(), height_text: String::new(), frames: 0, last_frame: None, worst_gap: std::time::Duration::ZERO, placement_started: false, active_monitor: monitor_idx, single_monitor: None, single_resolved: false, drag_point: std::cell::Cell::new(Pt::new(0.0, 0.0)), created: std::time::Instant::now() }
     }
 
     /// Live mode: no frozen images, the crosshairs are drawn over the real screen.
@@ -151,6 +154,9 @@ impl Overlay {
             }
         }
         self.frames += 1;
+        let now = std::time::Instant::now();
+        if let Some(prev) = self.last_frame { self.worst_gap = self.worst_gap.max(now - prev); }
+        self.last_frame = Some(now);
         if self.frames == 1 || self.frames == 4 { tracing::info!("capture timing: overlay frame {} at {} ms after it was built", self.frames, self.created.elapsed().as_millis()); }
         let m = if self.single_monitor.is_some() { self.resolve_single(ctx) } else { m.min(self.snapshot.monitors.len().saturating_sub(1)) };
         // Keys only reach the focused window: focus the one under the pointer once.
@@ -565,4 +571,12 @@ fn label_box(p: &egui::Painter, center: Pos2, text: &str, pal: &Palette) {
     p.rect_filled(r.translate(Vec2::new(0.0, 2.0)), 6.0, Color32::from_black_alpha(70));
     p.rect_filled(r, 6.0, pal.dark_panel);
     p.galley(r.min + Vec2::new(8.0, 4.0), galley, pal.text_bright);
+}
+
+impl Drop for Overlay {
+    /// One line per capture about how smoothly the overlay ran (diagnostics for "it feels laggy").
+    fn drop(&mut self) {
+        let secs = self.created.elapsed().as_secs_f32().max(0.001);
+        tracing::info!("overlay: {} frames in {:.1} s ({:.0} per second over all monitors), longest gap {} ms", self.frames, secs, self.frames as f32 / secs, self.worst_gap.as_millis());
+    }
 }

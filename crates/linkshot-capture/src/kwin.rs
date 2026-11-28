@@ -90,14 +90,25 @@ fn call(method: &str, args: Args<'_>, include_cursor: bool) -> Result<RgbaImage>
     img
 }
 
+thread_local! { static HIDE_OWN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
+
+/// Runs `f` with KWin screenshots on this thread leaving out LinkShot's own windows.
+pub fn without_own_windows<T>(f: impl FnOnce() -> T) -> T {
+    HIDE_OWN.with(|h| h.set(true));
+    let r = f();
+    HIDE_OWN.with(|h| h.set(false));
+    r
+}
+
 fn options(include_cursor: bool) -> HashMap<&'static str, Value<'static>> {
     let mut o = HashMap::new();
     o.insert("include-cursor", Value::from(include_cursor));
     o.insert("include-decoration", Value::from(true));
     o.insert("native-resolution", Value::from(true));
     // LinkShot's own windows (About, Editor, …) are captured like any other; the ones that must not
-    // appear (overlay, toolbars) are hidden or transparent at that moment anyway.
-    o.insert("hide-caller-windows", Value::from(false));
+    // appear (overlay, toolbars) are hidden or transparent at that moment anyway. Grabs made while the
+    // overlay is up (the magnifier's) ask KWin to leave our windows out: see `without_own_windows`.
+    o.insert("hide-caller-windows", Value::from(HIDE_OWN.with(|h| h.get())));
     o
 }
 
